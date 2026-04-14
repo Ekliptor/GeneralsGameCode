@@ -48,12 +48,23 @@ if(MINGW)
     include(cmake/widl.cmake)
 endif()
 
-# Find/Add build dependencies and stubs shared by all projects
+# Backend selection (RTS_AUDIO, RTS_VIDEO, RTS_RENDERER) must be parsed before
+# the legacy Windows-only SDK fetches below so each stub can early-return when
+# its backend isn't selected.
+include(cmake/config.cmake)
+
+# Find/Add build dependencies and stubs shared by all projects.
+# Each legacy .cmake file self-gates on the RTS_* backend selectors; the enclosing
+# Windows/32-bit guard stays only because these SDKs don't exist elsewhere.
 if((WIN32 OR "${CMAKE_SYSTEM}" MATCHES "Windows") AND ${CMAKE_SIZEOF_VOID_P} EQUAL 4)
     include(cmake/miles.cmake)
     include(cmake/bink.cmake)
     include(cmake/dx8.cmake)
 endif()
+
+# Cross-platform backends — no retail-compat platform gate.
+include(cmake/openal.cmake)
+include(cmake/ffmpeg.cmake)
 
 # Define a dummy stlport target when not on VC6.
 if (IS_VS6_BUILD)
@@ -62,7 +73,6 @@ else()
     add_library(stlport INTERFACE)
 endif()
 
-include(cmake/config.cmake)
 include(cmake/gamespy.cmake)
 include(cmake/lzhl.cmake)
 

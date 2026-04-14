@@ -45,7 +45,7 @@
 #include "vertmaterial.h"
 #include "texture.h"
 #include "d3d8.h"
-#include "d3dx8math.h"
+#include "matrix4.h"
 #include "statistics.h"
 #include <wwprofile.h>
 #include <algorithm>
@@ -246,14 +246,16 @@ void SortingRendererClass::Insert_Triangles(
 	WWASSERT(vertex_buffer);
 	WWASSERT(state->vertex_count<=vertex_buffer->Get_Vertex_Count());
 
-	D3DXMATRIX mtx=(D3DXMATRIX&)state->sorting_state.world*(D3DXMATRIX&)state->sorting_state.view;
-	D3DXVECTOR3 vec=(D3DXVECTOR3&)state->bounding_sphere.Center;
-	D3DXVECTOR4 transformed_vec;
-	D3DXVec3Transform(
-		&transformed_vec,
-		&vec,
-		&mtx);
-	state->transformed_center=Vector3(transformed_vec[0],transformed_vec[1],transformed_vec[2]);
+	// WWMath column-vector `M*v` with D3DMATRIX bytes equals D3DX row-vector `v*M`
+	// via dot with column i of M — see docs/Phase0-RHI-Seam.md.
+	const Matrix4x4& worldBytes = reinterpret_cast<const Matrix4x4&>(state->sorting_state.world);
+	const Matrix4x4& viewBytes  = reinterpret_cast<const Matrix4x4&>(state->sorting_state.view);
+	const Matrix4x4 mtx = worldBytes * viewBytes;
+	const Vector3& vec = state->bounding_sphere.Center;
+	state->transformed_center = Vector3(
+		vec.X*mtx[0][0] + vec.Y*mtx[1][0] + vec.Z*mtx[2][0] + mtx[3][0],
+		vec.X*mtx[0][1] + vec.Y*mtx[1][1] + vec.Z*mtx[2][1] + mtx[3][1],
+		vec.X*mtx[0][2] + vec.Y*mtx[1][2] + vec.Z*mtx[2][2] + mtx[3][2]);
 
 
 	/// @todo lorenzen sez use a bucket sort here... and stop copying so much data so many times
@@ -441,8 +443,9 @@ void SortingRendererClass::Flush_Sorting_Pool()
 			memcpy(dest_verts, src_verts, sizeof(VertexFormatXYZNDUV2)*state->vertex_count);
 			dest_verts += state->vertex_count;
 
-			D3DXMATRIX d3d_mtx=(D3DXMATRIX&)state->sorting_state.world*(D3DXMATRIX&)state->sorting_state.view;
-			const Matrix4x4& mtx=(const Matrix4x4&)d3d_mtx;
+			const Matrix4x4& worldBytes = reinterpret_cast<const Matrix4x4&>(state->sorting_state.world);
+			const Matrix4x4& viewBytes  = reinterpret_cast<const Matrix4x4&>(state->sorting_state.view);
+			const Matrix4x4 mtx = worldBytes * viewBytes;
 
 			unsigned short* indices=nullptr;
 			SortingIndexBufferClass* index_buffer=static_cast<SortingIndexBufferClass*>(state->sorting_state.index_buffer);
@@ -707,16 +710,15 @@ void SortingRendererClass::Insert_VolumeParticle(
 	WWASSERT(vertex_buffer);
 	WWASSERT(state->vertex_count<=vertex_buffer->Get_Vertex_Count());
 
-	// Transform the center point to view space for sorting
-
-	D3DXMATRIX mtx=(D3DXMATRIX&)state->sorting_state.world*(D3DXMATRIX&)state->sorting_state.view;
-	D3DXVECTOR3 vec=(D3DXVECTOR3&)state->bounding_sphere.Center;
-	D3DXVECTOR4 transformed_vec;
-	D3DXVec3Transform(
-		&transformed_vec,
-		&vec,
-		&mtx);
-	state->transformed_center=Vector3(transformed_vec[0],transformed_vec[1],transformed_vec[2]);
+	// Transform the center point to view space for sorting.
+	const Matrix4x4& worldBytes = reinterpret_cast<const Matrix4x4&>(state->sorting_state.world);
+	const Matrix4x4& viewBytes  = reinterpret_cast<const Matrix4x4&>(state->sorting_state.view);
+	const Matrix4x4 mtx = worldBytes * viewBytes;
+	const Vector3& vec = state->bounding_sphere.Center;
+	state->transformed_center = Vector3(
+		vec.X*mtx[0][0] + vec.Y*mtx[1][0] + vec.Z*mtx[2][0] + mtx[3][0],
+		vec.X*mtx[0][1] + vec.Y*mtx[1][1] + vec.Z*mtx[2][1] + mtx[3][1],
+		vec.X*mtx[0][2] + vec.Y*mtx[1][2] + vec.Z*mtx[2][2] + mtx[3][2]);
 
 
 	// BUT WHAT IS THE DEAL WITH THE VERTCOUNT AND POLYCOUNT BEING N BUT TRANSFORMED CENTER COUNT == 1

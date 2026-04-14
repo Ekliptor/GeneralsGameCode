@@ -46,7 +46,7 @@ extern "C" {
 	#include <libswscale/swscale.h>
 }
 
-#ifdef RTS_HAS_OPENAL
+#if RTS_AUDIO_OPENAL
 #include "OpenALAudioDevice/OpenALAudioManager.h"
 #include "OpenALAudioDevice/OpenALAudioStream.h"
 #endif
@@ -203,18 +203,9 @@ VideoStreamInterface* FFmpegVideoPlayer::createStream( File* file )
 
 	if ( stream )
 	{
-
 		stream->m_next = m_firstStream;
 		stream->m_player = this;
 		m_firstStream = stream;
-
-		// never let volume go to 0, as Bink will interpret that as "play at full volume".
-		Int mod = (Int) ((TheAudio->getVolume(AudioAffect_Speech) * 0.8f) * 100) + 1;
-		[[maybe_unused]]  Int volume = (32768 * mod) / 100;
-		DEBUG_LOG(("FFmpegVideoPlayer::createStream() - About to set volume (%g -> %d -> %d",
-			TheAudio->getVolume(AudioAffect_Speech), mod, volume));
-		//BinkSetVolume( stream->m_handle,0, volume);
-		DEBUG_LOG(("FFmpegVideoPlayer::createStream() - set volume"));
 	}
 
 	return stream;
@@ -278,27 +269,20 @@ void FFmpegVideoPlayer::notifyVideoPlayerOfNewProvider( Bool nowHasValid )
 {
 	if (!nowHasValid) {
 		TheAudio->releaseHandleForBink();
-		//BinkSetSoundTrack(0, 0);
 	} else {
 		initializeBinkWithMiles();
 	}
 }
 
 //============================================================================
+// Legacy name preserved from the Bink/Miles pairing; the hook now just
+// requests the audio backend's video-audio handle (OpenALAudioStream under
+// OpenAL, nullptr under Miles). ToDo (Phase 3 cleanup): rename to a neutral
+// identifier like primeVideoAudioHandle.
 //============================================================================
 void FFmpegVideoPlayer::initializeBinkWithMiles()
 {
-	Int retVal = 0;
-	void *driver = TheAudio->getHandleForBink();
-
-	if ( driver )
-	{
-		//retVal = BinkSoundUseDirectSound(driver);
-	}
-	if( !driver || retVal == 0)
-	{
-		//BinkSetSoundTrack ( 0,0 );
-	}
+	(void)TheAudio->getHandleForBink();
 }
 
 //============================================================================
@@ -311,7 +295,7 @@ FFmpegVideoStream::FFmpegVideoStream(FFmpegFile* file)
 	m_ffmpegFile->setFrameCallback(onFrame);
 	m_ffmpegFile->setUserData(this);
 
-#ifdef RTS_USE_OPENAL
+#if RTS_AUDIO_OPENAL
 	// Release the audio handle if it's already in use
 	OpenALAudioStream* audioStream = (OpenALAudioStream*)TheAudio->getHandleForBink();
 	audioStream->reset();
@@ -321,7 +305,7 @@ FFmpegVideoStream::FFmpegVideoStream(FFmpegFile* file)
 	while (m_good && m_gotFrame == false)
 		m_good = m_ffmpegFile->decodePacket();
 
- #ifdef RTS_USE_OPENAL
+ #if RTS_AUDIO_OPENAL
 	// Start audio playback
 	audioStream->play();
 #endif
@@ -349,7 +333,7 @@ void FFmpegVideoStream::onFrame(AVFrame *frame, int stream_idx, int stream_type,
 		videoStream->m_frame = av_frame_clone(frame);
 		videoStream->m_gotFrame = true;
 	}
-#ifdef RTS_USE_OPENAL
+#if RTS_AUDIO_OPENAL
 	else if (stream_type == AVMEDIA_TYPE_AUDIO) {
 		OpenALAudioStream* audioStream = (OpenALAudioStream*)TheAudio->getHandleForBink();
 		audioStream->update();
@@ -394,12 +378,10 @@ void FFmpegVideoStream::onFrame(AVFrame *frame, int stream_idx, int stream_type,
 
 void FFmpegVideoStream::update()
 {
-#ifdef RTS_USE_OPENAL
-	// Start audio playback
+#if RTS_AUDIO_OPENAL
 	OpenALAudioStream* audioStream = (OpenALAudioStream*)TheAudio->getHandleForBink();
 	audioStream->play();
 #endif
-	//BinkWait( m_handle );
 }
 
 //============================================================================
@@ -409,10 +391,7 @@ void FFmpegVideoStream::update()
 Bool FFmpegVideoStream::isFrameReady()
 {
 	uint64_t time = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
-	bool ready = (time - m_startTime) >= m_ffmpegFile->getFrameTime() * frameIndex();
-	return ready;
-
-	//return !BinkWait( m_handle );
+	return (time - m_startTime) >= m_ffmpegFile->getFrameTime() * frameIndex();
 }
 
 //============================================================================
@@ -421,7 +400,7 @@ Bool FFmpegVideoStream::isFrameReady()
 
 void FFmpegVideoStream::frameDecompress()
 {
-	//BinkDoFrame( m_handle );
+	// No-op: FFmpeg decoding happens in frameNext() via FFmpegFile::decodePacket.
 }
 
 //============================================================================

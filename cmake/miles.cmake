@@ -1,3 +1,9 @@
+# Only fetch the Miles stub when Miles is the selected audio backend.
+# See cmake/config-build.cmake RTS_AUDIO.
+if(NOT RTS_AUDIO_LOWER STREQUAL "miles")
+    return()
+endif()
+
 FetchContent_Declare(
     miles
     GIT_REPOSITORY https://github.com/TheSuperHackers/miles-sdk-stub.git

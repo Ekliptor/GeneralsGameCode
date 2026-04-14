@@ -48,7 +48,6 @@
 #include "WW3D2/meshmdl.h"
 #include "Lib/BaseType.h"
 #include "W3DDevice/GameClient/HeightMap.h"
-#include "d3dx8math.h"
 #include "Common/GlobalData.h"
 #include "Common/DrawModule.h"
 #include "W3DDevice/GameClient/W3DVolumetricShadow.h"
@@ -3194,7 +3193,7 @@ void W3DVolumetricShadowManager::renderStencilShadows()
 		return;	//need device to render anything.
 
 	struct _TRANSLITVERTEX {
-	    D3DXVECTOR4 p;
+	    Vector4 p;  // D3DFVF_XYZRHW position; Vector4's {X,Y,Z,W} layout matches.
 		DWORD color;   // diffuse color
 	} v[4];
 
@@ -3204,10 +3203,10 @@ void W3DVolumetricShadowManager::renderStencilShadows()
 	width=TheTacticalView->getWidth();
 	height=TheTacticalView->getHeight();
 
-    v[0].p = D3DXVECTOR4( xpos+width, ypos+height, 0.0f, 1.0f );
-    v[1].p = D3DXVECTOR4( xpos+width, 0, 0.0f, 1.0f );
-    v[2].p = D3DXVECTOR4(  xpos, ypos+height, 0.0f, 1.0f );
-    v[3].p = D3DXVECTOR4(  xpos,  0, 0.0f, 1.0f );
+    v[0].p = Vector4( xpos+width, ypos+height, 0.0f, 1.0f );
+    v[1].p = Vector4( xpos+width, 0, 0.0f, 1.0f );
+    v[2].p = Vector4(  xpos, ypos+height, 0.0f, 1.0f );
+    v[3].p = Vector4(  xpos,  0, 0.0f, 1.0f );
     v[0].color = TheW3DShadowManager->getShadowColor();
     v[1].color = TheW3DShadowManager->getShadowColor();
     v[2].color = TheW3DShadowManager->getShadowColor();

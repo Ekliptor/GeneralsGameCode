@@ -1,6 +1,4 @@
 set(GAMEENGINEDEVICE_SRC
-    Include/MilesAudioDevice/MilesAudioManager.h
-    Include/VideoDevice/Bink/BinkVideoPlayer.h
 #    Include/W3DDevice/Common/W3DConvert.h
 #    Include/W3DDevice/Common/W3DFunctionLexicon.h
 #    Include/W3DDevice/Common/W3DModuleFactory.h
@@ -89,8 +87,6 @@ set(GAMEENGINEDEVICE_SRC
     Include/Win32Device/GameClient/Win32DIKeyboard.h
     #Include/Win32Device/GameClient/Win32DIMouse.h
     Include/Win32Device/GameClient/Win32Mouse.h
-    Source/MilesAudioDevice/MilesAudioManager.cpp
-    Source/VideoDevice/Bink/BinkVideoPlayer.cpp
 #    Source/W3DDevice/Common/System/W3DFunctionLexicon.cpp
     Source/W3DDevice/Common/System/W3DRadar.cpp
 #    Source/W3DDevice/Common/Thing/W3DModuleFactory.cpp
@@ -221,25 +217,47 @@ target_link_libraries(corei_gameenginedevice_private INTERFACE
 )
 
 target_link_libraries(corei_gameenginedevice_public INTERFACE
-    binkstub
     corei_gameengine_public
     d3d8lib
-    milesstub
 )
 
-if(RTS_BUILD_OPTION_FFMPEG)
-    find_package(FFMPEG REQUIRED)
+# --- Audio backend sources & libs ------------------------------------------
+if(RTS_AUDIO_LOWER STREQUAL "miles")
+    target_sources(corei_gameenginedevice_private INTERFACE
+        Include/MilesAudioDevice/MilesAudioManager.h
+        Source/MilesAudioDevice/MilesAudioManager.cpp
+    )
+    target_link_libraries(corei_gameenginedevice_public INTERFACE milesstub)
+elseif(RTS_AUDIO_LOWER STREQUAL "openal" OR RTS_AUDIO_LOWER STREQUAL "null")
+    target_sources(corei_gameenginedevice_private INTERFACE
+        Include/OpenALAudioDevice/OpenALAudioManager.h
+        Include/OpenALAudioDevice/OpenALAudioStream.h
+        Source/OpenALAudioDevice/OpenALAudioManager.cpp
+        Source/OpenALAudioDevice/OpenALAudioStream.cpp
+    )
+    target_link_libraries(corei_gameenginedevice_public INTERFACE OpenAL::OpenAL)
+endif()
 
-    if(FFMPEG_FOUND)
-        target_sources(corei_gameenginedevice_private INTERFACE
-            Include/VideoDevice/FFmpeg/FFmpegFile.h
-            Include/VideoDevice/FFmpeg/FFmpegVideoPlayer.h
-            Source/VideoDevice/FFmpeg/FFmpegFile.cpp
-            Source/VideoDevice/FFmpeg/FFmpegVideoPlayer.cpp
-        )
-        target_include_directories(corei_gameenginedevice_private INTERFACE ${FFMPEG_INCLUDE_DIRS})
-        target_link_directories(corei_gameenginedevice_private INTERFACE ${FFMPEG_LIBRARY_DIRS})
-        target_link_libraries(corei_gameenginedevice_private INTERFACE ${FFMPEG_LIBRARIES})
-        target_compile_definitions(corei_gameenginedevice_public INTERFACE RTS_HAS_FFMPEG)
-    endif()
+# --- Video backend sources & libs ------------------------------------------
+if(RTS_VIDEO_LOWER STREQUAL "bink")
+    target_sources(corei_gameenginedevice_private INTERFACE
+        Include/VideoDevice/Bink/BinkVideoPlayer.h
+        Source/VideoDevice/Bink/BinkVideoPlayer.cpp
+    )
+    target_link_libraries(corei_gameenginedevice_public INTERFACE binkstub)
+elseif(RTS_VIDEO_LOWER STREQUAL "ffmpeg")
+    target_sources(corei_gameenginedevice_private INTERFACE
+        Include/VideoDevice/FFmpeg/FFmpegFile.h
+        Include/VideoDevice/FFmpeg/FFmpegVideoPlayer.h
+        Source/VideoDevice/FFmpeg/FFmpegFile.cpp
+        Source/VideoDevice/FFmpeg/FFmpegVideoPlayer.cpp
+    )
+endif()
+
+# FFmpeg libs — required when RTS_VIDEO=ffmpeg OR when the OpenAL audio backend
+# depends on libav for sample decoding (see cmake/openal.cmake).
+if(RTS_VIDEO_LOWER STREQUAL "ffmpeg" OR RTS_AUDIO_NEEDS_FFMPEG)
+    target_include_directories(corei_gameenginedevice_private INTERFACE ${FFMPEG_INCLUDE_DIRS})
+    target_link_directories(corei_gameenginedevice_private INTERFACE ${FFMPEG_LIBRARY_DIRS})
+    target_link_libraries(corei_gameenginedevice_private INTERFACE ${FFMPEG_LIBRARIES})
 endif()

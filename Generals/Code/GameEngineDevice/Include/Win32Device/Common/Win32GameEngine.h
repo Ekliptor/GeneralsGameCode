@@ -36,7 +36,11 @@
 #include "GameClient/ParticleSys.h"
 #include "GameLogic/GameLogic.h"
 #include "GameNetwork/NetworkInterface.h"
+#if RTS_AUDIO_OPENAL || RTS_AUDIO_NULL
+#include "OpenALAudioDevice/OpenALAudioManager.h"
+#else
 #include "MilesAudioDevice/MilesAudioManager.h"
+#endif
 #include "Win32Device/Common/Win32BIGFileSystem.h"
 #include "Win32Device/Common/Win32LocalFileSystem.h"
 #include "W3DDevice/Common/W3DModuleFactory.h"
@@ -111,7 +115,15 @@ inline Radar *Win32GameEngine::createRadar(Bool dummy)
 inline WebBrowser *Win32GameEngine::createWebBrowser() { return NEW CComObject<W3DWebBrowser>; }
 inline AudioManager *Win32GameEngine::createAudioManager(Bool dummy)
 {
+#if RTS_AUDIO_OPENAL
+	if (dummy)
+		return NEW OpenALAudioManagerNull;
+	return NEW OpenALAudioManager;
+#elif RTS_AUDIO_NULL
+	return NEW OpenALAudioManagerNull;
+#else // RTS_AUDIO_MILES
 	if (dummy)
 		return NEW MilesAudioManagerDummy;
 	return NEW MilesAudioManager;
+#endif
 }

@@ -29,15 +29,15 @@
 
 #pragma once
 
-#include <d3dx8math.h>
 #include "Common/STLTypedefs.h"
+#include "WWMath/matrix4.h"
 
 #define USUAL_TOLERANCE 1.0f
 
 class BezierSegment
 {
 	protected:
-		static const D3DXMATRIX s_bezBasisMatrix;
+		static const Matrix4x4 s_bezBasisMatrix;
 		Coord3D m_controlPoints[4];
 
 	public:	// Constructors
