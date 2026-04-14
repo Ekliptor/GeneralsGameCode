@@ -28,49 +28,22 @@
 
 #pragma once
 
-#include "Common/PerfTimer.h"
+#include <mutex>
 
-#ifdef PERF_TIMERS
-extern PerfGather TheCritSecPerfGather;
-#endif
-
+// std::mutex maps to SRWLOCK on MSVC/Windows >=7, futex on Linux, and unfair
+// on macOS — same order-of-magnitude as CRITICAL_SECTION for the uncontended
+// case, with no Win32 dependency. Non-recursive, matching the prior usage.
 class CriticalSection
 {
-	CRITICAL_SECTION m_windowsCriticalSection;
+	std::mutex m_mutex;
 
 	public:
-		CriticalSection()
-		{
-			#ifdef PERF_TIMERS
-			AutoPerfGather a(TheCritSecPerfGather);
-			#endif
-			InitializeCriticalSection( &m_windowsCriticalSection );
-		}
-
-		virtual ~CriticalSection()
-		{
-			#ifdef PERF_TIMERS
-			AutoPerfGather a(TheCritSecPerfGather);
-			#endif
-			DeleteCriticalSection( &m_windowsCriticalSection );
-		}
+		CriticalSection() = default;
+		virtual ~CriticalSection() = default;
 
 	public:	// Use these when entering/exiting a critical section.
-		void enter()
-		{
-			#ifdef PERF_TIMERS
-			AutoPerfGather a(TheCritSecPerfGather);
-			#endif
-			EnterCriticalSection( &m_windowsCriticalSection );
-		}
-
-		void exit()
-		{
-			#ifdef PERF_TIMERS
-			AutoPerfGather a(TheCritSecPerfGather);
-			#endif
-			LeaveCriticalSection( &m_windowsCriticalSection );
-		}
+		void enter() { m_mutex.lock(); }
+		void exit()  { m_mutex.unlock(); }
 };
 
 class ScopedCriticalSection

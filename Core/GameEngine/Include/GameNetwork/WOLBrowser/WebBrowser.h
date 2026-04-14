@@ -16,38 +16,19 @@
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-////////////////////////////////////////////////////////////////////////////////
-//																																						//
-//  (c) 2001-2003 Electronic Arts Inc.																				//
-//																																						//
-////////////////////////////////////////////////////////////////////////////////
-
-/******************************************************************************
-*
-* NAME
-*     $Archive:  $
-*
-* DESCRIPTION
-*     Web Browser
-*
-* PROGRAMMER
-*     Bryan Cleveland
-*     $Author:  $
-*
-* VERSION INFO
-*     $Revision:  $
-*     $Modtime:  $
-*
-******************************************************************************/
+// WebBrowser.h //////////////////////////////////////////////////////////////
+//
+// Phase 3 — Plain abstract interface. Retail used an embedded IE ActiveX
+// control routed through FEBDispatch/ATL to host in-game community screens
+// (TOS, Message Board). Those services are dead; the class survives as a
+// no-op shell so its two UI callers (WOLLoginMenu, WOLLadderScreen) still
+// link. External URL routing, if any returns, should use SDL_OpenURL.
+///////////////////////////////////////////////////////////////////////////////
 
 #pragma once
 
 #include "Common/SubsystemInterface.h"
-#include <atlbase.h>
-#include <windows.h>
-#include <Common/GameMemory.h>
-#include "EABrowserDispatch/BrowserDispatch.h"
-#include "FEBDispatch.h"
+#include "Common/GameMemory.h"
 #include <Lib/BaseType.h>
 
 class GameWindow;
@@ -69,56 +50,32 @@ public:
 	WebBrowserURL *m_next;
 
 	static const FieldParse m_URLFieldParseTable[];		///< the parse table for INI definition
-
 };
 
 
+class WebBrowser : public SubsystemInterface
+{
+public:
+	WebBrowser();
+	virtual ~WebBrowser() override;
 
-class WebBrowser :
-		public FEBDispatch<WebBrowser, IBrowserDispatch, &IID_IBrowserDispatch>,
-		public SubsystemInterface
-	{
-	public:
-		virtual void init() override;
-		virtual void reset() override;
-		virtual void update() override;
+	virtual void init() override;
+	virtual void reset() override;
+	virtual void update() override;
 
-		// Create an instance of the embedded browser for Dune Emperor.
-		virtual Bool createBrowserWindow(const char *tag, GameWindow *win) = 0;
-		virtual void closeBrowserWindow(GameWindow *win) = 0;
+	// Concrete subclasses no-op these post-Phase-3. Kept virtual so a future
+	// cross-platform in-game browser (CEF, Ultralight) can slot in.
+	virtual Bool createBrowserWindow(const char *tag, GameWindow *win) = 0;
+	virtual void closeBrowserWindow(GameWindow *win) = 0;
 
-		WebBrowserURL *makeNewURL(AsciiString tag);
-		WebBrowserURL *findURL(AsciiString tag);
+	WebBrowserURL *makeNewURL(AsciiString tag);
+	WebBrowserURL *findURL(AsciiString tag);
 
-	protected:
-		// Protected to prevent direct construction via new, use CreateInstance() instead.
-		WebBrowser();
-		virtual ~WebBrowser() override;
+protected:
+	WebBrowser(const WebBrowser&) = delete;
+	WebBrowser& operator=(const WebBrowser&) = delete;
 
-		// Protected to prevent copy and assignment
-		WebBrowser(const WebBrowser&);
-		const WebBrowser& operator=(const WebBrowser&);
+	WebBrowserURL *m_urlList;
+};
 
-//		Bool RetrievePageURL(const char* page, char* url, int size);
-//		Bool RetrieveHTMLPath(char* path, int size);
-
-	protected:
-		ULONG mRefCount;
-		WebBrowserURL *m_urlList;
-
-	//---------------------------------------------------------------------------
-	// IUnknown methods
-	//---------------------------------------------------------------------------
-	protected:
-		HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** ppvObject) IUNKNOWN_NOEXCEPT;
-		ULONG STDMETHODCALLTYPE AddRef() IUNKNOWN_NOEXCEPT;
-		ULONG STDMETHODCALLTYPE Release() IUNKNOWN_NOEXCEPT;
-
-	//---------------------------------------------------------------------------
-	// IBrowserDispatch methods
-	//---------------------------------------------------------------------------
-	public:
-		STDMETHOD(TestMethod)(Int num1);
-	};
-
-extern CComObject<WebBrowser> *TheWebBrowser;
+extern WebBrowser *TheWebBrowser;

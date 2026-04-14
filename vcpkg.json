@@ -4,6 +4,7 @@
     "dependencies": [
       "zlib",
       "ffmpeg",
-      "openal-soft"
+      "openal-soft",
+      "sdl3"
     ]
   }

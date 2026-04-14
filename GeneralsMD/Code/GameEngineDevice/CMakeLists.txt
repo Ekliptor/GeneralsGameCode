@@ -174,7 +174,6 @@ set(GAMEENGINEDEVICE_SRC
 #    Source/W3DDevice/GameClient/W3DVideoBuffer.cpp
 #    Source/W3DDevice/GameClient/W3DView.cpp
     Source/W3DDevice/GameClient/W3dWaypointBuffer.cpp
-    Source/W3DDevice/GameClient/W3DWebBrowser.cpp
 #    Source/W3DDevice/GameClient/Water/W3DWater.cpp
 #    Source/W3DDevice/GameClient/Water/W3DWaterTracks.cpp
 #    Source/W3DDevice/GameClient/WorldHeightMap.cpp

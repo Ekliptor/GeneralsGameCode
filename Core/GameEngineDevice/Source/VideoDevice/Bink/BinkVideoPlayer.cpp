@@ -130,7 +130,7 @@ void	BinkVideoPlayer::init()
 	// Need to load the stuff from the ini file.
 	VideoPlayer::init();
 
-	initializeBinkWithMiles();
+	primeVideoAudio();
 }
 
 //============================================================================
@@ -139,7 +139,7 @@ void	BinkVideoPlayer::init()
 
 void BinkVideoPlayer::deinit()
 {
-	TheAudio->releaseHandleForBink();
+	TheAudio->releaseVideoAudioStreamHandle();
 	VideoPlayer::deinit();
 }
 
@@ -271,19 +271,19 @@ VideoStreamInterface*	BinkVideoPlayer::load( AsciiString movieTitle )
 void BinkVideoPlayer::notifyVideoPlayerOfNewProvider( Bool nowHasValid )
 {
 	if (!nowHasValid) {
-		TheAudio->releaseHandleForBink();
+		TheAudio->releaseVideoAudioStreamHandle();
 		BinkSetSoundTrack(0, nullptr);
 	} else {
-		initializeBinkWithMiles();
+		primeVideoAudio();
 	}
 }
 
 //============================================================================
 //============================================================================
-void BinkVideoPlayer::initializeBinkWithMiles()
+void BinkVideoPlayer::primeVideoAudio()
 {
 	Int retVal = 0;
-	void *driver = TheAudio->getHandleForBink();
+	void *driver = TheAudio->getVideoAudioStreamHandle();
 
 	if ( driver )
 	{

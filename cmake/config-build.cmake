@@ -58,6 +58,25 @@ else()
 endif()
 add_feature_info(VideoBackend TRUE "Video backend: ${RTS_VIDEO_LOWER}")
 
+# Platform backend selector (Phase 2 — window/input/timing).
+# win32 = legacy WinMain + WndProc + DirectInput (Windows retail reference).
+# sdl   = cross-platform SDL3 (window, input, events); required on non-Windows hosts.
+set(RTS_PLATFORM "win32" CACHE STRING
+    "Platform backend (window/input/timing). Values: win32 (Windows retail) | sdl (cross-platform SDL3)")
+set_property(CACHE RTS_PLATFORM PROPERTY STRINGS "win32" "sdl")
+string(TOLOWER "${RTS_PLATFORM}" RTS_PLATFORM_LOWER)
+if(RTS_PLATFORM_LOWER STREQUAL "win32")
+    if(NOT (WIN32 OR "${CMAKE_SYSTEM}" MATCHES "Windows"))
+        message(FATAL_ERROR "RTS_PLATFORM=win32 requires a Windows host. Use -DRTS_PLATFORM=sdl on non-Windows.")
+    endif()
+    target_compile_definitions(core_config INTERFACE RTS_PLATFORM_WIN32=1)
+elseif(RTS_PLATFORM_LOWER STREQUAL "sdl")
+    target_compile_definitions(core_config INTERFACE RTS_PLATFORM_SDL=1)
+else()
+    message(FATAL_ERROR "RTS_PLATFORM=${RTS_PLATFORM} is not supported. Use win32|sdl.")
+endif()
+add_feature_info(PlatformBackend TRUE "Platform backend: ${RTS_PLATFORM_LOWER}")
+
 if(NOT RTS_BUILD_ZEROHOUR AND NOT RTS_BUILD_GENERALS)
     set(RTS_BUILD_ZEROHOUR TRUE)
     message("You must select one project to build, building Zero Hour by default.")

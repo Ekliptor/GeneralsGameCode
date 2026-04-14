@@ -64,10 +64,17 @@ target_include_directories(g_generals PRIVATE
     ${CMAKE_BINARY_DIR}/Code/Libraries
 )
 
-target_sources(g_generals PRIVATE
-    WinMain.cpp
-    WinMain.h
-)
+if(RTS_PLATFORM_LOWER STREQUAL "sdl")
+    target_sources(g_generals PRIVATE
+        AppMain.cpp
+    )
+    target_link_libraries(g_generals PRIVATE SDL3::SDL3)
+else()
+    target_sources(g_generals PRIVATE
+        WinMain.cpp
+        WinMain.h
+    )
+endif()
 
 # RC files are optional for MinGW builds
 # Icon: LoadIcon() handles missing resource gracefully (uses default system icon)

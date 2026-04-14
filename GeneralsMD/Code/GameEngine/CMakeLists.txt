@@ -545,7 +545,6 @@ set(GAMEENGINE_SRC
 #    Include/GameNetwork/Transport.h
 #    Include/GameNetwork/udp.h
 #    Include/GameNetwork/User.h
-#    Include/GameNetwork/WOLBrowser/FEBDispatch.h
 #    Include/GameNetwork/WOLBrowser/WebBrowser.h
     Include/Precompiled/PreRTS.h
 #    Source/Common/Audio/AudioEventRTS.cpp

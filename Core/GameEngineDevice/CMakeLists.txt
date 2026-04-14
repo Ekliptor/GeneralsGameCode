@@ -84,7 +84,6 @@ set(GAMEENGINEDEVICE_SRC
 #    Include/Win32Device/Common/Win32GameEngine.h
     Include/Win32Device/Common/Win32LocalFile.h
     Include/Win32Device/Common/Win32LocalFileSystem.h
-    Include/Win32Device/GameClient/Win32DIKeyboard.h
     #Include/Win32Device/GameClient/Win32DIMouse.h
     Include/Win32Device/GameClient/Win32Mouse.h
 #    Source/W3DDevice/Common/System/W3DFunctionLexicon.cpp
@@ -183,7 +182,6 @@ set(GAMEENGINEDEVICE_SRC
     Source/Win32Device/Common/Win32LocalFile.cpp
     Source/Win32Device/Common/Win32LocalFileSystem.cpp
 #    Source/Win32Device/Common/Win32OSDisplay.cpp
-    Source/Win32Device/GameClient/Win32DIKeyboard.cpp
     #Source/Win32Device/GameClient/Win32DIMouse.cpp
     Source/Win32Device/GameClient/Win32Mouse.cpp
 )
@@ -260,4 +258,26 @@ if(RTS_VIDEO_LOWER STREQUAL "ffmpeg" OR RTS_AUDIO_NEEDS_FFMPEG)
     target_include_directories(corei_gameenginedevice_private INTERFACE ${FFMPEG_INCLUDE_DIRS})
     target_link_directories(corei_gameenginedevice_private INTERFACE ${FFMPEG_LIBRARY_DIRS})
     target_link_libraries(corei_gameenginedevice_private INTERFACE ${FFMPEG_LIBRARIES})
+endif()
+
+# --- Platform backend (window/input/timing) sources & libs -----------------
+# RTS_PLATFORM=win32 keeps the legacy DirectInput keyboard + WinMain WndProc.
+# RTS_PLATFORM=sdl swaps the keyboard for SDLKeyboard and adds the SDL event
+# pump (SDLGameEngine); the mouse stays Win32Mouse-based on Windows because
+# the SDL pump translates SDL events into its existing addWin32Event feeder.
+if(RTS_PLATFORM_LOWER STREQUAL "win32")
+    target_sources(corei_gameenginedevice_private INTERFACE
+        Include/Win32Device/GameClient/Win32DIKeyboard.h
+        Source/Win32Device/GameClient/Win32DIKeyboard.cpp
+    )
+elseif(RTS_PLATFORM_LOWER STREQUAL "sdl")
+    target_sources(corei_gameenginedevice_private INTERFACE
+        Include/SDLDevice/Common/SDLGameEngine.h
+        Include/SDLDevice/Common/SDLGlobals.h
+        Include/SDLDevice/GameClient/SDLKeyboard.h
+        Source/SDLDevice/Common/SDLGameEngine.cpp
+        Source/SDLDevice/Common/SDLGlobals.cpp
+        Source/SDLDevice/GameClient/SDLKeyboard.cpp
+    )
+    target_link_libraries(corei_gameenginedevice_public INTERFACE SDL3::SDL3)
 endif()

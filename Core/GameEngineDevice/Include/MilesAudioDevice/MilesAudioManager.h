@@ -184,8 +184,8 @@ class MilesAudioManager : public AudioManager
 		virtual void setSpeakerType( UnsignedInt speakerType ) override;
 		virtual UnsignedInt getSpeakerType() override;
 
- 		virtual void *getHandleForBink() override;
- 		virtual void releaseHandleForBink() override;
+ 		virtual void *getVideoAudioStreamHandle() override;
+ 		virtual void releaseVideoAudioStreamHandle() override;
 
 		virtual void friend_forcePlayAudioEventRTS(const AudioEventRTS* eventToPlay) override;
 
@@ -371,8 +371,8 @@ class MilesAudioManagerDummy : public MilesAudioManager
 	virtual void removePlayingAudio(AsciiString eventName) override {}
 	virtual void removeAllDisabledAudio() override {}
 	virtual Bool has3DSensitiveStreamsPlaying() const override { return false; }
-	virtual void* getHandleForBink() override { return nullptr; }
-	virtual void releaseHandleForBink() override {}
+	virtual void* getVideoAudioStreamHandle() override { return nullptr; }
+	virtual void releaseVideoAudioStreamHandle() override {}
 	virtual void friend_forcePlayAudioEventRTS(const AudioEventRTS* eventToPlay) override {}
 	virtual void setPreferredProvider(AsciiString providerNdx) override {}
 	virtual void setPreferredSpeaker(AsciiString speakerType) override {}

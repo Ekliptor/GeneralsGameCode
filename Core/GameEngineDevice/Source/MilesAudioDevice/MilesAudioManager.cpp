@@ -101,7 +101,7 @@ MilesAudioManager::MilesAudioManager() :
 MilesAudioManager::~MilesAudioManager()
 {
 	DEBUG_ASSERTCRASH(m_binkHandle == nullptr, ("Leaked a Bink handle. Chuybregts"));
-	releaseHandleForBink();
+	releaseVideoAudioStreamHandle();
 	closeDevice();
 	delete m_audioCache;
 
@@ -2949,7 +2949,7 @@ void MilesAudioManager::processRequest( AudioRequest *req )
 }
 
 //-------------------------------------------------------------------------------------------------
-void *MilesAudioManager::getHandleForBink()
+void *MilesAudioManager::getVideoAudioStreamHandle()
 {
 	if (m_binkHandle == nullptr) {
 		PlayingAudio *aud = allocatePlayingAudio();
@@ -2972,7 +2972,7 @@ void *MilesAudioManager::getHandleForBink()
 }
 
 //-------------------------------------------------------------------------------------------------
-void MilesAudioManager::releaseHandleForBink()
+void MilesAudioManager::releaseVideoAudioStreamHandle()
 {
 	if (m_binkHandle) {
 		releasePlayingAudio(m_binkHandle);

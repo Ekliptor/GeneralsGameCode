@@ -16,29 +16,22 @@
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-////////////////////////////////////////////////////////////////////////////////
-//																																						//
-//  (c) 2001-2003 Electronic Arts Inc.																				//
-//																																						//
-////////////////////////////////////////////////////////////////////////////////
-
 ///// W3DWebBrowser.h ////////////////////////
 // July 2002, Bryan Cleveland
+// Phase 3: embedded IE/COM browser removed. Class remains as a no-op shell
+// so the two legacy UI call sites (WOLLoginMenu, WOLLadderScreen) still link.
 
 #pragma once
 
 #include "GameNetwork/WOLBrowser/WebBrowser.h"
 
-class TextureClass;
-class Image;
 class GameWindow;
 
 class W3DWebBrowser : public WebBrowser
 {
-	public:
-		W3DWebBrowser();
+public:
+	W3DWebBrowser() = default;
 
-		virtual Bool createBrowserWindow(const char *tag, GameWindow *win) override;
-		virtual void closeBrowserWindow(GameWindow *win) override;
-
+	virtual Bool createBrowserWindow(const char * /*tag*/, GameWindow * /*win*/) override { return TRUE; }
+	virtual void closeBrowserWindow(GameWindow * /*win*/) override {}
 };

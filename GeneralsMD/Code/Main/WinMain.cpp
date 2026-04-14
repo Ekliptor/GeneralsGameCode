@@ -30,6 +30,12 @@
 //
 ///////////////////////////////////////////////////////////////////////////////
 
+// Phase 2: this entire translation unit is the legacy Win32 entry point.
+// The cross-platform SDL3 entry lives in AppMain.cpp; the Main/CMakeLists.txt
+// picks one or the other based on RTS_PLATFORM. Compiling both would double-
+// define WinMain/CreateGameEngine, so guard the body here.
+#if RTS_PLATFORM_WIN32
+
 // SYSTEM INCLUDES ////////////////////////////////////////////////////////////
 #define WIN32_LEAN_AND_MEAN  // only bare bones windows stuff wanted
 #include <windows.h>
@@ -967,3 +973,5 @@ GameEngine *CreateGameEngine()
 	return engine;
 
 }
+
+#endif // RTS_PLATFORM_WIN32

@@ -130,7 +130,7 @@ void	FFmpegVideoPlayer::init()
 	// Need to load the stuff from the ini file.
 	VideoPlayer::init();
 
-	initializeBinkWithMiles();
+	primeVideoAudio();
 }
 
 //============================================================================
@@ -139,7 +139,7 @@ void	FFmpegVideoPlayer::init()
 
 void FFmpegVideoPlayer::deinit()
 {
-	TheAudio->releaseHandleForBink();
+	TheAudio->releaseVideoAudioStreamHandle();
 	VideoPlayer::deinit();
 }
 
@@ -268,9 +268,9 @@ VideoStreamInterface*	FFmpegVideoPlayer::load( AsciiString movieTitle )
 void FFmpegVideoPlayer::notifyVideoPlayerOfNewProvider( Bool nowHasValid )
 {
 	if (!nowHasValid) {
-		TheAudio->releaseHandleForBink();
+		TheAudio->releaseVideoAudioStreamHandle();
 	} else {
-		initializeBinkWithMiles();
+		primeVideoAudio();
 	}
 }
 
@@ -280,9 +280,9 @@ void FFmpegVideoPlayer::notifyVideoPlayerOfNewProvider( Bool nowHasValid )
 // OpenAL, nullptr under Miles). ToDo (Phase 3 cleanup): rename to a neutral
 // identifier like primeVideoAudioHandle.
 //============================================================================
-void FFmpegVideoPlayer::initializeBinkWithMiles()
+void FFmpegVideoPlayer::primeVideoAudio()
 {
-	(void)TheAudio->getHandleForBink();
+	(void)TheAudio->getVideoAudioStreamHandle();
 }
 
 //============================================================================
@@ -297,7 +297,7 @@ FFmpegVideoStream::FFmpegVideoStream(FFmpegFile* file)
 
 #if RTS_AUDIO_OPENAL
 	// Release the audio handle if it's already in use
-	OpenALAudioStream* audioStream = (OpenALAudioStream*)TheAudio->getHandleForBink();
+	OpenALAudioStream* audioStream = (OpenALAudioStream*)TheAudio->getVideoAudioStreamHandle();
 	audioStream->reset();
 #endif
 
@@ -335,7 +335,7 @@ void FFmpegVideoStream::onFrame(AVFrame *frame, int stream_idx, int stream_type,
 	}
 #if RTS_AUDIO_OPENAL
 	else if (stream_type == AVMEDIA_TYPE_AUDIO) {
-		OpenALAudioStream* audioStream = (OpenALAudioStream*)TheAudio->getHandleForBink();
+		OpenALAudioStream* audioStream = (OpenALAudioStream*)TheAudio->getVideoAudioStreamHandle();
 		audioStream->update();
 		AVSampleFormat sampleFmt = static_cast<AVSampleFormat>(frame->format);
 		const int bytesPerSample = av_get_bytes_per_sample(sampleFmt);
@@ -379,7 +379,7 @@ void FFmpegVideoStream::onFrame(AVFrame *frame, int stream_idx, int stream_type,
 void FFmpegVideoStream::update()
 {
 #if RTS_AUDIO_OPENAL
-	OpenALAudioStream* audioStream = (OpenALAudioStream*)TheAudio->getHandleForBink();
+	OpenALAudioStream* audioStream = (OpenALAudioStream*)TheAudio->getVideoAudioStreamHandle();
 	audioStream->play();
 #endif
 }

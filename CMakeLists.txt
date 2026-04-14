@@ -65,6 +65,7 @@ endif()
 # Cross-platform backends — no retail-compat platform gate.
 include(cmake/openal.cmake)
 include(cmake/ffmpeg.cmake)
+include(cmake/sdl3.cmake)
 
 # Define a dummy stlport target when not on VC6.
 if (IS_VS6_BUILD)

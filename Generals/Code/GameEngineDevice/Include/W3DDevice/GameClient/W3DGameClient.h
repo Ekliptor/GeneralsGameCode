@@ -50,8 +50,13 @@
 #else
 #include "VideoDevice/Bink/BinkVideoPlayer.h"
 #endif
+#if RTS_PLATFORM_SDL
+#include "SDLDevice/Common/SDLGameEngine.h"
+#include "SDLDevice/GameClient/SDLKeyboard.h"
+#else
 #include "Win32Device/GameClient/Win32DIKeyboard.h"
 #include "Win32Device/GameClient/Win32DIMouse.h"
+#endif
 #include "Win32Device/GameClient/Win32Mouse.h"
 #include "W3DDevice/GameClient/W3DMouse.h"
 
@@ -123,11 +128,20 @@ protected:
 
 };
 
-inline Keyboard *W3DGameClient::createKeyboard() { return NEW DirectInputKeyboard; }
+inline Keyboard *W3DGameClient::createKeyboard()
+{
+#if RTS_PLATFORM_SDL
+	SDLKeyboard *kb = NEW SDLKeyboard;
+	TheSDLKeyboard = kb;   ///< global for the SDL event pump
+	return kb;
+#else
+	return NEW DirectInputKeyboard;
+#endif
+}
 inline Mouse *W3DGameClient::createMouse()
 {
 	//return new DirectInputMouse;
 	Win32Mouse * mouse = NEW W3DMouse;
-	TheWin32Mouse = mouse;   ///< global cheat for the WndProc()
+	TheWin32Mouse = mouse;   ///< global cheat for the WndProc() / SDL event pump
 	return mouse;
 }

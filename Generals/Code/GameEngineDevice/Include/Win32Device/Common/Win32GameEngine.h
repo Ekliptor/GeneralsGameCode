@@ -112,7 +112,7 @@ inline Radar *Win32GameEngine::createRadar(Bool dummy)
 		return NEW RadarDummy;
 	return NEW W3DRadar;
 }
-inline WebBrowser *Win32GameEngine::createWebBrowser() { return NEW CComObject<W3DWebBrowser>; }
+inline WebBrowser *Win32GameEngine::createWebBrowser() { return NEW W3DWebBrowser; }
 inline AudioManager *Win32GameEngine::createAudioManager(Bool dummy)
 {
 #if RTS_AUDIO_OPENAL
