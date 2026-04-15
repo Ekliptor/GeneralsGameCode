@@ -28,6 +28,7 @@
 #include "Common/crc.h"
 #include "GameNetwork/Transport.h"
 #include "GameNetwork/NetworkInterface.h"
+#include "GameNetwork/NetworkInit.h"
 
 
 //--------------------------------------------------------------------------
@@ -69,7 +70,6 @@ static inline void decryptBuf( unsigned char *buf, Int len )
 
 Transport::Transport()
 {
-	m_winsockInit = false;
 	m_udpsock = nullptr;
 }
 
@@ -86,22 +86,8 @@ Bool Transport::init( AsciiString ip, UnsignedShort port )
 Bool Transport::init( UnsignedInt ip, UnsignedShort port )
 {
 	// ----- Initialize Winsock -----
-	if (!m_winsockInit)
-	{
-		WORD verReq = MAKEWORD(2, 2);
-		WSADATA wsadata;
-
-		int err = WSAStartup(verReq, &wsadata);
-		if (err != 0) {
-			return false;
-		}
-
-		if ((LOBYTE(wsadata.wVersion) != 2) || (HIBYTE(wsadata.wVersion) !=2)) {
-			WSACleanup();
-			return false;
-		}
-		m_winsockInit = true;
-	}
+	if (!NetworkInit::ensureStarted())
+		return false;
 
 	// ------- Bind our port --------
 	delete m_udpsock;
@@ -163,12 +149,6 @@ void Transport::reset()
 {
 	delete m_udpsock;
 	m_udpsock = nullptr;
-
-	if (m_winsockInit)
-	{
-		WSACleanup();
-		m_winsockInit = false;
-	}
 }
 
 Bool Transport::update()

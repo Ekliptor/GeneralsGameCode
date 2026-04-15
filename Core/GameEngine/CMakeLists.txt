@@ -519,6 +519,7 @@ set(GAMEENGINE_SRC
     Include/GameNetwork/GameSpy/GSConfig.h
     Include/GameNetwork/GameSpy/LadderDefs.h
     Include/GameNetwork/GameSpy/LobbyUtils.h
+    Include/GameNetwork/GameSpy/LocalChatAddress.h
     Include/GameNetwork/GameSpy/MainMenuUtils.h
     Include/GameNetwork/GameSpy/PeerDefs.h
     Include/GameNetwork/GameSpy/PeerDefsImplementation.h
@@ -547,6 +548,7 @@ set(GAMEENGINE_SRC
     Include/GameNetwork/NetPacket.h
     Include/GameNetwork/NetPacketStructs.h
     Include/GameNetwork/NetworkDefs.h
+    Include/GameNetwork/NetworkInit.h
     Include/GameNetwork/NetworkInterface.h
     Include/GameNetwork/networkutil.h
     Include/GameNetwork/RankPointValue.h
@@ -1122,10 +1124,12 @@ set(GAMEENGINE_SRC
     Source/GameNetwork/GameSpy/Thread/PeerThread.cpp
     Source/GameNetwork/GameSpy/Thread/PersistentStorageThread.cpp
     Source/GameNetwork/GameSpy/Thread/PingThread.cpp
+    Source/GameNetwork/GameSpy/LocalChatAddress.cpp
     Source/GameNetwork/GameSpy/Thread/ThreadUtils.cpp
     Source/GameNetwork/GameSpyOverlay.cpp
 #    Source/GameNetwork/GUIUtil.cpp
     Source/GameNetwork/IPEnumeration.cpp
+    Source/GameNetwork/NetworkInit.cpp
     Source/GameNetwork/LANAPI.cpp
     Source/GameNetwork/LANAPICallbacks.cpp
     Source/GameNetwork/LANAPIhandlers.cpp

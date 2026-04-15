@@ -79,7 +79,6 @@ public:
 	HRESULT downloadNextQueuedFile();
 
 private:
-	Bool m_winsockInit;
 	CDownload *m_download;
 	Bool m_wasError;
 	Bool m_sawEnd;

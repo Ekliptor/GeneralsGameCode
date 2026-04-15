@@ -33,6 +33,7 @@
 
 #include "GameNetwork/FirewallHelper.h"
 #include "GameNetwork/GameSpy.h"
+#include "GameNetwork/GameSpy/LocalChatAddress.h"
 #include "GameNetwork/GameSpyChat.h"
 #include "GameNetwork/GameSpyGameInfo.h"
 #include "GameNetwork/GameSpyOverlay.h"

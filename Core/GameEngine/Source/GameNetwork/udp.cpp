@@ -34,6 +34,7 @@
 #include "Common/GameEngine.h"
 //#include "GameNetwork/NetworkInterface.h"
 #include "GameNetwork/udp.h"
+#include "GameNetwork/networkutil.h"
 
 
 //-------------------------------------------------------------------------
@@ -42,6 +43,7 @@
 
 #define CASE(x) case (x): return #x;
 
+#ifdef _WIN32
 AsciiString GetWSAErrorString( Int error )
 {
 	switch (error)
@@ -108,6 +110,17 @@ AsciiString GetWSAErrorString( Int error )
 	return AsciiString::TheEmptyString; // will not be hit, ever.
 }
 
+#else // POSIX
+
+AsciiString GetWSAErrorString( Int error )
+{
+	AsciiString ret;
+	ret.format("errno %d (%s)", error, ::strerror(error));
+	return ret;
+}
+
+#endif // _WIN32
+
 #undef CASE
 
 #endif // defined(RTS_DEBUG)
@@ -127,17 +140,13 @@ UDP::~UDP()
 
 Int UDP::Bind(const char *Host,UnsignedShort port)
 {
-  struct hostent *hostStruct;
-  struct in_addr *hostNode;
-
   if (isdigit(Host[0]))
     return ( Bind( ntohl(inet_addr(Host)), port) );
 
-  hostStruct = gethostbyname(Host);
-  if (hostStruct == nullptr)
+  UnsignedInt ip = 0;
+  if (!resolveHostIPv4(Host, ip))
     return (0);
-  hostNode = (struct in_addr *) hostStruct->h_addr;
-  return ( Bind(ntohl(hostNode->s_addr),port) );
+  return ( Bind(ip, port) );
 }
 
 // You must call bind, implicit binding is for sissies
@@ -154,22 +163,18 @@ Int UDP::Bind(UnsignedInt IP,UnsignedShort Port)
   addr.sin_port=Port;
   addr.sin_addr.s_addr=IP;
   fd=socket(AF_INET,SOCK_DGRAM,DEFAULT_PROTOCOL);
-  #ifdef _WIN32
   if (fd==SOCKET_ERROR)
     fd=-1;
-  #endif
   if (fd==-1)
     return(UNKNOWN);
 
   retval=bind(fd,(struct sockaddr *)&addr,sizeof(addr));
 
-  #ifdef _WIN32
   if (retval==SOCKET_ERROR)
 	{
     retval=-1;
 		m_lastError = WSAGetLastError();
 	}
-  #endif
   if (retval==-1)
   {
     status=GetStatus();
@@ -177,7 +182,7 @@ Int UDP::Bind(UnsignedInt IP,UnsignedShort Port)
     return(status);
   }
 
-  int namelen=sizeof(addr);
+  socklen_t namelen=sizeof(addr);
   getsockname(fd, (struct sockaddr *)&addr, &namelen);
 
   myIP=ntohl(addr.sin_addr.s_addr);
@@ -235,7 +240,7 @@ Int UDP::Write(const unsigned char *msg,UnsignedInt len,UnsignedInt IP,UnsignedS
   // This happens frequently
   if ((IP==0)||(port==0)) return(ADDRNOTAVAIL);
 
-#ifdef _UNIX
+#ifndef _WIN32
   errno=0;
 #endif
   to.sin_port=htons(port);
@@ -244,7 +249,6 @@ Int UDP::Write(const unsigned char *msg,UnsignedInt len,UnsignedInt IP,UnsignedS
 
   ClearStatus();
   retval=sendto(fd,(const char *)msg,len,0,(struct sockaddr *)&to,sizeof(to));
-  #ifdef _WIN32
   if (retval==SOCKET_ERROR)
 	{
     retval=-1;
@@ -254,7 +258,6 @@ Int UDP::Write(const unsigned char *msg,UnsignedInt len,UnsignedInt IP,UnsignedS
 #endif
 		DEBUG_ASSERTLOG(errCount++ > 100, ("UDP::Write() - WSA error is %s", GetWSAErrorString(WSAGetLastError()).str()));
 	}
-  #endif
 
   return(retval);
 }
@@ -266,8 +269,7 @@ Int UDP::Read(unsigned char *msg,UnsignedInt len,sockaddr_in *from)
 
   if (from!=nullptr)
   {
-    retval=recvfrom(fd,(char *)msg,len,0,(struct sockaddr *)from,&alen);
-    #ifdef _WIN32
+    retval=recvfrom(fd,(char *)msg,len,0,(struct sockaddr *)from,(socklen_t *)&alen);
     if (retval == SOCKET_ERROR)
 		{
 			if (WSAGetLastError() != WSAEWOULDBLOCK)
@@ -283,12 +285,10 @@ Int UDP::Read(unsigned char *msg,UnsignedInt len,sockaddr_in *from)
 				retval = 0;
 			}
 		}
-    #endif
   }
   else
   {
     retval=recvfrom(fd,(char *)msg,len,0,nullptr,nullptr);
-    #ifdef _WIN32
     if (retval==SOCKET_ERROR)
 		{
 			if (WSAGetLastError() != WSAEWOULDBLOCK)
@@ -304,7 +304,6 @@ Int UDP::Read(unsigned char *msg,UnsignedInt len,sockaddr_in *from)
 				retval = 0;
 			}
 		}
-    #endif
   }
   return(retval);
 }

@@ -24,31 +24,9 @@
 
 #pragma once
 
-#ifdef _UNIX
-#include <errno.h>
-#endif
-
+#include <Utility/socket_compat.h>
 #ifdef _WIN32
-#include <winsock.h>
 #include <io.h>
-//#define close _close
-//#define read  _read
-//#define write _write
-
-#else  //UNIX
-#include <netdb.h>
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-#include <unistd.h>
-#include <sys/time.h>
-#include <fcntl.h>
-#include <limits.h>
-#endif
-
-#ifdef AIX
-#include <sys/select.h>
 #endif
 
 #include "Lib/BaseType.h"

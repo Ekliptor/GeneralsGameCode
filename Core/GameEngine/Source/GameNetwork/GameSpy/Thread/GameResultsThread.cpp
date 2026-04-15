@@ -28,9 +28,11 @@
 
 #include "PreRTS.h"	// This must go first in EVERY cpp file in the GameEngine
 
-#include <winsock.h>	// This one has to be here. Prevents collisions with winsock2.h
+#include <Utility/socket_compat.h>
 
 #include "GameNetwork/GameSpy/GameResultsThread.h"
+#include "GameNetwork/NetworkInit.h"
+#include "GameNetwork/networkutil.h"
 #include "mutex.h"
 #include "thread.h"
 
@@ -208,11 +210,7 @@ void GameResultsThreadClass::Thread_Function()
 	try {
 	GameResultsRequest req;
 
-	WSADATA wsaData;
-
-	// Fire up winsock (prob already done, but doesn't matter)
-	WORD wVersionRequested = MAKEWORD(1, 1);
-	WSAStartup( wVersionRequested, &wsaData );
+	NetworkInit::ensureStarted();
 
 	while ( running )
 	{
@@ -231,22 +229,18 @@ void GameResultsThreadClass::Thread_Function()
 			}
 			else
 			{
-				HOSTENT *hostStruct;
-				in_addr *hostNode;
-				hostStruct = gethostbyname(hostnameBuffer);
-				if (hostStruct == nullptr)
+				UnsignedInt hostOrderIP = 0;
+				if (!resolveHostIPv4(hostnameBuffer, hostOrderIP))
 				{
 					DEBUG_LOG(("sending game results to %s - host lookup failed", hostnameBuffer));
-
-					// Even though this failed to resolve IP, still need to send a
-					//   callback.
 					IP = 0xFFFFFFFF;   // flag for IP resolve failed
 				}
 				else
 				{
-					hostNode = (in_addr *) hostStruct->h_addr;
-					IP = hostNode->s_addr;
-					DEBUG_LOG(("sending game results to %s IP = %s", hostnameBuffer, inet_ntoa(*hostNode) ));
+					IP = htonl(hostOrderIP);
+					in_addr hostNode;
+					hostNode.s_addr = IP;
+					DEBUG_LOG(("sending game results to %s IP = %s", hostnameBuffer, inet_ntoa(hostNode) ));
 				}
 			}
 
@@ -261,8 +255,6 @@ void GameResultsThreadClass::Thread_Function()
 		// end our timeslice
 		Switch_Thread();
 	}
-
-	WSACleanup();
 	} catch ( ... ) {
 		DEBUG_CRASH(("Exception in results thread!"));
 	}

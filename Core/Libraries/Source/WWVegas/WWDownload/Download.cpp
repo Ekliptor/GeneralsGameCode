@@ -20,11 +20,16 @@
 #include "DownloadDebug.h"
 #include "Download.h"
 #include "stringex.h"
-#include <mmsystem.h>
 #include <assert.h>
-#include <direct.h>
 #include <stdlib.h>
 #include <sys/stat.h>
+#ifdef _WIN32
+#include <mmsystem.h>
+#include <direct.h>
+#else
+#include <sys/types.h>
+#include <Utility/time_compat.h>
+#endif
 
 /////////////////////////////////////////////////////////////////////////////
 // CDownload
@@ -66,7 +71,11 @@ HRESULT CDownload::DownloadFile(LPCSTR server, LPCSTR username, LPCSTR password,
 	}
 
 	// Make sure we have a download directory
+#ifdef _WIN32
 	_mkdir("download");
+#else
+	mkdir("download", 0755);
+#endif
 
 	// Copy parameters to member variables.
 	strlcpy( m_Server, server, sizeof( m_Server ) );
@@ -275,10 +284,17 @@ HRESULT CDownload::PumpMessages()
 			//   never ever change so this is not a concern.
 			//
 			// We identify patches because they are written into the patches folder.
+#ifdef _WIN32
 			struct _stat statdata;
 			if (	(_stat(m_LocalFile, &statdata) == 0) &&
 					(statdata.st_size == m_FileSize) &&
 					(_strnicmp(m_LocalFile, "patches\\", strlen("patches\\"))==0)) {
+#else
+			struct stat statdata;
+			if (	(stat(m_LocalFile, &statdata) == 0) &&
+					(statdata.st_size == m_FileSize) &&
+					(strncasecmp(m_LocalFile, "patches\\", strlen("patches\\"))==0)) {
+#endif
 				// OK, no need to download this again....
 
 				m_Status				= DOWNLOADSTATUS_FINDINGFILE;  // ready to find another file
@@ -363,7 +379,11 @@ HRESULT CDownload::PumpMessages()
 		{
 			// Not the first read.
 			int predictionIndex = ( m_predictions++ ) & 0x7;
+#ifdef _WIN32
 			m_predictionTimes[ predictionIndex ] = MulDiv( timetaken, (m_FileSize - m_BytesRead), (m_BytesRead - m_StartPosition) );
+#else
+			m_predictionTimes[ predictionIndex ] = (int)((int64_t)timetaken * (m_FileSize - m_BytesRead) / (m_BytesRead - m_StartPosition));
+#endif
 			//__int64 numerator = ( m_FileSize - m_BytesRead )  * timetaken;
 			//__int64 denominator = ( m_BytesRead - m_StartPosition );
 			//m_predictionTimes[ predictionIndex ] = numerator/denominator;

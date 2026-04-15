@@ -26,6 +26,8 @@
 #include "PreRTS.h"	// This must go first in EVERY cpp file in the GameEngine
 
 #include "GameNetwork/networkutil.h"
+#include "GameNetwork/NetworkInit.h"
+#include <Utility/socket_compat.h>
 
 // TheSuperHackers @tweak Mauller 26/08/2025 reduce the minimum runahead from 10
 // This lets network games run at latencies down to 133ms when the network conditions allow
@@ -76,35 +78,61 @@ void dumpBufferToLog(const void *vBuf, Int len, const char *fname, Int line)
 #endif // DEBUG_LOGGING
 
 /**
+ * Resolve an IPv4 host (numeric or DNS name) to a host-order 32-bit IP.
+ * Returns TRUE on success. Uses getaddrinfo so the same code works on
+ * Windows (via Winsock 2) and POSIX.
+ */
+Bool resolveHostIPv4(const char *host, UnsignedInt &outHostOrderIP)
+{
+	if (host == nullptr || *host == '\0')
+	{
+		return FALSE;
+	}
+
+	NetworkInit::ensureStarted();
+
+	struct addrinfo hints;
+	memset(&hints, 0, sizeof(hints));
+	hints.ai_family = AF_INET;
+	hints.ai_socktype = SOCK_DGRAM;
+
+	struct addrinfo *res = nullptr;
+	const int err = getaddrinfo(host, nullptr, &hints, &res);
+	if (err != 0 || res == nullptr)
+	{
+		DEBUG_LOG(("resolveHostIPv4(): getaddrinfo failed for '%s' (err=%d)", host, err));
+		if (res != nullptr)
+		{
+			freeaddrinfo(res);
+		}
+		return FALSE;
+	}
+
+	const struct sockaddr_in *addr = reinterpret_cast<const sockaddr_in *>(res->ai_addr);
+	outHostOrderIP = ntohl(addr->sin_addr.s_addr);
+	freeaddrinfo(res);
+	return TRUE;
+}
+
+/**
  * ResolveIP turns a string ("games2.westwood.com", or "192.168.0.1") into
  * a 32-bit unsigned integer.
  */
 UnsignedInt ResolveIP(AsciiString host)
 {
-  struct hostent *hostStruct;
-  struct in_addr *hostNode;
+	if (host.isEmpty())
+	{
+		DEBUG_LOG(("ResolveIP(): Can't resolve null"));
+		return 0;
+	}
 
-  if (host.isEmpty())
-  {
-	  DEBUG_LOG(("ResolveIP(): Can't resolve null"));
-	  return 0;
-  }
-
-  // String such as "127.0.0.1"
-  if (isdigit(host.getCharAt(0)))
-  {
-    return ( ntohl(inet_addr(host.str())) );
-  }
-
-  // String such as "localhost"
-  hostStruct = gethostbyname(host.str());
-  if (hostStruct == nullptr)
-  {
-	  DEBUG_LOG(("ResolveIP(): Can't resolve %s", host.str()));
-	  return 0;
-  }
-  hostNode = (struct in_addr *) hostStruct->h_addr;
-  return ( ntohl(hostNode->s_addr) );
+	UnsignedInt ip = 0;
+	if (!resolveHostIPv4(host.str(), ip))
+	{
+		DEBUG_LOG(("ResolveIP(): Can't resolve %s", host.str()));
+		return 0;
+	}
+	return ip;
 }
 
 /**

@@ -31,7 +31,12 @@
 // INCLUDES ///////////////////////////////////////////////////////////////////////////
 #include "PreRTS.h"	// This must go first in EVERY cpp file in the GameEngine
 
+#include <atomic>
 #include <fcntl.h>
+#include <thread>
+
+#include "GameNetwork/NetworkInit.h"
+#include "GameNetwork/networkutil.h"
 
 //#include "Common/Registry.h"
 #include "Common/UserPreferences.h"
@@ -68,10 +73,10 @@ static char *MOTDBuffer = nullptr;
 static char *configBuffer = nullptr;
 GameWindow *onlineCancelWindow = nullptr;
 
-static Bool s_asyncDNSThreadDone = TRUE;
-static Bool s_asyncDNSThreadSucceeded = FALSE;
+static std::atomic<Bool> s_asyncDNSThreadDone = TRUE;
+static std::atomic<Bool> s_asyncDNSThreadSucceeded = FALSE;
+static std::atomic<Bool> s_asyncDNSThreadRunning = FALSE;
 static Bool s_asyncDNSLookupInProgress = FALSE;
-static HANDLE s_asyncDNSThreadHandle = nullptr;
 enum {
 	LOOKUP_INPROGRESS,
 	LOOKUP_FAILED,
@@ -711,11 +716,10 @@ void CheckNumPlayersOnline()
 
 ///////////////////////////////////////////////////////////////////////////////////////
 
-DWORD WINAPI asyncGethostbynameThreadFunc( void * szName )
+static void asyncGethostbynameThreadFunc( const char *szName )
 {
-	HOSTENT *he = gethostbyname( (const char *)szName );
-
-	if (he)
+	UnsignedInt ip = 0;
+	if (resolveHostIPv4(szName, ip))
 	{
 		s_asyncDNSThreadSucceeded = TRUE;
 	}
@@ -725,24 +729,28 @@ DWORD WINAPI asyncGethostbynameThreadFunc( void * szName )
 	}
 
 	s_asyncDNSThreadDone = TRUE;
-	return 0;
+	s_asyncDNSThreadRunning = FALSE;
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////
 
 int asyncGethostbyname(char * szName)
 {
-	static int            stat = 0;
-	static unsigned long  threadid;
+	static int stat = 0;
 
 	if( stat == 0 )
 	{
-		/* Kick off gethostname thread */
+		NetworkInit::ensureStarted();
 		s_asyncDNSThreadDone = FALSE;
-		s_asyncDNSThreadHandle = CreateThread( nullptr, 0, asyncGethostbynameThreadFunc, szName, 0, &threadid );
+		s_asyncDNSThreadRunning = TRUE;
 
-		if( s_asyncDNSThreadHandle == nullptr )
+		try
 		{
+			std::thread(asyncGethostbynameThreadFunc, szName).detach();
+		}
+		catch (...)
+		{
+			s_asyncDNSThreadRunning = FALSE;
 			return( LOOKUP_FAILED );
 		}
 		stat = 1;
@@ -754,7 +762,6 @@ int asyncGethostbyname(char * szName)
 			/* Thread finished */
 			stat = 0;
 			s_asyncDNSLookupInProgress = FALSE;
-			s_asyncDNSThreadHandle = nullptr;
 			return( (s_asyncDNSThreadSucceeded)?LOOKUP_SUCCEEDED:LOOKUP_FAILED );
 		}
 	}
@@ -806,15 +813,11 @@ void HTTPThinkWrapper()
 
 void StopAsyncDNSCheck()
 {
-	if (s_asyncDNSThreadHandle)
-	{
-#ifdef DEBUG_CRASHING
-		Int res =
-#endif
-			TerminateThread(s_asyncDNSThreadHandle,0);
-		DEBUG_ASSERTCRASH(res, ("Could not terminate the Async DNS Lookup thread!"));	// Thread still not killed!
-	}
-	s_asyncDNSThreadHandle = nullptr;
+	// Phase 4: the std::thread is detached and self-terminates when
+	// asyncGethostbynameThreadFunc returns. We can't forcibly kill a detached
+	// std::thread, so we just drop the "in progress" flag; the worker will
+	// finish shortly and its result is ignored since s_asyncDNSLookupInProgress
+	// is false.
 	s_asyncDNSLookupInProgress = FALSE;
 }
 

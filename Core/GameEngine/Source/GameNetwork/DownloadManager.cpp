@@ -30,6 +30,7 @@
 
 #include "GameClient/GameText.h"
 #include "GameNetwork/DownloadManager.h"
+#include "GameNetwork/NetworkInit.h"
 
 DownloadManager *TheDownloadManager;
 
@@ -40,35 +41,12 @@ DownloadManager::DownloadManager()
 	m_queuedDownloads.clear();
 	m_statusString = TheGameText->fetch("FTP:StatusIdle");
 
-	// ----- Initialize Winsock -----
-	m_winsockInit = true;
-	WORD verReq = MAKEWORD(2, 2);
-	WSADATA wsadata;
-
-	int err = WSAStartup(verReq, &wsadata);
-	if (err != 0)
-	{
-		m_winsockInit = false;
-	}
-	else
-	{
-		if ((LOBYTE(wsadata.wVersion) != 2) || (HIBYTE(wsadata.wVersion) !=2))
-		{
-			WSACleanup();
-			m_winsockInit = false;
-		}
-	}
-
+	NetworkInit::ensureStarted();
 }
 
 DownloadManager::~DownloadManager()
 {
 	delete m_download;
-	if (m_winsockInit)
-	{
-		WSACleanup();
-		m_winsockInit = false;
-	}
 }
 
 void DownloadManager::init()

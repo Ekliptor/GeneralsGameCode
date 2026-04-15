@@ -19,10 +19,22 @@
 // Registry.cpp
 // Simple interface for storing/retrieving registry values
 // Author: Matthew D. Campbell, December 2001
+//
+// Phase 4: this helper is a standalone Win32 registry wrapper scoped to
+// WWDownload (download resume state). On non-Windows the getters return
+// false (→ no resume, start fresh) and the setters are no-ops. The main
+// game's registry surface migrated to RegistryStore/INI in Phase 3; this
+// wrapper is kept Windows-only because its only caller-path is patch/map
+// downloads which are already behind the libcurl flow.
 
 #include "Registry.h"
 #include <string>
+
+#ifdef _WIN32
 #include "win.h"
+#endif
+
+#ifdef _WIN32
 
 bool  getStringFromRegistry(HKEY root, std::string path, std::string key, std::string& val)
 {
@@ -169,4 +181,31 @@ bool SetUnsignedIntInRegistry( std::string path, std::string key, unsigned int v
 	// in HKEY_CURRENT_USER and writes there should always succeed without admin privileges.
 	return setUnsignedIntInRegistry( HKEY_CURRENT_USER, fullPath, key, val );
 }
+
+#else // !_WIN32
+
+// POSIX stubs — the download resume feature degrades gracefully to "always
+// start fresh". Good enough until Phase 6 makes macOS actually run the game.
+
+bool GetStringFromRegistry(std::string /*path*/, std::string /*key*/, std::string& /*val*/)
+{
+	return false;
+}
+
+bool GetUnsignedIntFromRegistry(std::string /*path*/, std::string /*key*/, unsigned int& /*val*/)
+{
+	return false;
+}
+
+bool SetStringInRegistry(std::string /*path*/, std::string /*key*/, std::string /*val*/)
+{
+	return true;
+}
+
+bool SetUnsignedIntInRegistry(std::string /*path*/, std::string /*key*/, unsigned int /*val*/)
+{
+	return true;
+}
+
+#endif // _WIN32
 

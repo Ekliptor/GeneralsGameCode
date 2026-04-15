@@ -5,6 +5,7 @@
       "zlib",
       "ffmpeg",
       "openal-soft",
-      "sdl3"
+      "sdl3",
+      "curl"
     ]
   }

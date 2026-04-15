@@ -29,6 +29,7 @@
 
 UnsignedInt AssembleIp(UnsignedByte a, UnsignedByte b, UnsignedByte c, UnsignedByte d);
 UnsignedInt ResolveIP(AsciiString host);
+Bool resolveHostIPv4(const char *host, UnsignedInt &outHostOrderIP);
 UnsignedShort GenerateNextCommandID();
 Bool DoesCommandRequireACommandID(NetCommandType type);
 Bool CommandRequiresAck(NetCommandMsg *msg);

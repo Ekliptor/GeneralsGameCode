@@ -52,6 +52,7 @@
 #include "Common/OptionPreferences.h"
 #include "GameNetwork/FirewallHelper.h"
 #include "GameNetwork/NAT.h"
+#include "GameNetwork/networkutil.h"
 #include "GameNetwork/udp.h"
 #include "GameNetwork/NetworkDefs.h"
 #include "GameNetwork/GameSpy/GSConfig.h"
@@ -668,19 +669,23 @@ Bool FirewallHelperClass::detectionBeginUpdate() {
 		/*
 		** Do the lookup.
 		*/
-		struct hostent *host_info = gethostbyname(mangler_name_ptr);
-
-		if (!host_info) {
-			DEBUG_LOG(("gethostbyname failed! Error code %d", WSAGetLastError()));
+		UnsignedInt hostOrderIP = 0;
+		if (!resolveHostIPv4(mangler_name_ptr, hostOrderIP)) {
+			DEBUG_LOG(("resolveHostIPv4 failed for mangler %s", mangler_name_ptr));
 			break;
 		}
+		UnsignedByte addrBytes[4];
+		addrBytes[0] = (UnsignedByte)((hostOrderIP >> 24) & 0xff);
+		addrBytes[1] = (UnsignedByte)((hostOrderIP >> 16) & 0xff);
+		addrBytes[2] = (UnsignedByte)((hostOrderIP >> 8) & 0xff);
+		addrBytes[3] = (UnsignedByte)(hostOrderIP & 0xff);
 
 		/*
 		** See if we already have that address in the list.
 		*/
 		Bool found = FALSE;
 		for (Int i=0 ; i<m_numManglers; i++) {
-			if (memcmp(mangler_addresses[i], &host_info->h_addr_list[0][0], 4) == 0) {
+			if (memcmp(mangler_addresses[i], addrBytes, 4) == 0) {
 				found = TRUE;
 				break;
 			}
@@ -690,8 +695,7 @@ Bool FirewallHelperClass::detectionBeginUpdate() {
 		*/
 		if (!found) {
 			Int m = m_numManglers++;
-			memcpy(&mangler_addresses[m][0], &host_info->h_addr_list[0][0], 4);
-			ntohl((UnsignedInt)mangler_addresses[m]);
+			memcpy(&mangler_addresses[m][0], addrBytes, 4);
 			DEBUG_LOG(("Found mangler address at %d.%d.%d.%d", mangler_addresses[m][0], mangler_addresses[m][1], mangler_addresses[m][2], mangler_addresses[m][3]));
 		}
 

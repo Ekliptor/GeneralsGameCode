@@ -25,8 +25,16 @@
 #include "PreRTS.h"	// This must go first in EVERY cpp file in the GameEngine
 
 #include "GameNetwork/IPEnumeration.h"
+#include "GameNetwork/NetworkInit.h"
 #include "GameNetwork/networkutil.h"
 #include "GameClient/ClientInstance.h"
+
+#include <Utility/socket_compat.h>
+
+#ifndef _WIN32
+#include <ifaddrs.h>
+#include <net/if.h>
+#endif
 
 IPEnumeration::IPEnumeration()
 {
@@ -36,11 +44,7 @@ IPEnumeration::IPEnumeration()
 
 IPEnumeration::~IPEnumeration()
 {
-	if (m_isWinsockInitialized)
-	{
-		WSACleanup();
-		m_isWinsockInitialized = false;
-	}
+	m_isWinsockInitialized = false;
 
 	EnumeratedIP *ip = m_IPlist;
 	while (ip)
@@ -56,46 +60,9 @@ EnumeratedIP * IPEnumeration::getAddresses()
 	if (m_IPlist)
 		return m_IPlist;
 
-	if (!m_isWinsockInitialized)
-	{
-		WORD verReq = MAKEWORD(2, 2);
-		WSADATA wsadata;
-
-		int err = WSAStartup(verReq, &wsadata);
-		if (err != 0) {
-			return nullptr;
-		}
-
-		if ((LOBYTE(wsadata.wVersion) != 2) || (HIBYTE(wsadata.wVersion) !=2)) {
-			WSACleanup();
-			return nullptr;
-		}
-		m_isWinsockInitialized = true;
-	}
-
-	// get the local machine's host name
-	char hostname[256];
-	if (gethostname(hostname, sizeof(hostname)))
-	{
-		DEBUG_LOG(("Failed call to gethostname; WSAGetLastError returned %d", WSAGetLastError()));
+	if (!NetworkInit::ensureStarted())
 		return nullptr;
-	}
-	DEBUG_LOG(("Hostname is '%s'", hostname));
-
-	// get host information from the host name
-	HOSTENT* hostEnt = gethostbyname(hostname);
-	if (hostEnt == nullptr)
-	{
-		DEBUG_LOG(("Failed call to gethostbyname; WSAGetLastError returned %d", WSAGetLastError()));
-		return nullptr;
-	}
-
-	// sanity-check the length of the IP adress
-	if (hostEnt->h_length != 4)
-	{
-		DEBUG_LOG(("gethostbyname returns oddly-sized IP addresses!"));
-		return nullptr;
-	}
+	m_isWinsockInitialized = true;
 
 	// TheSuperHackers @feature Add one unique local host IP address for each multi client instance.
 	if (rts::ClientInstance::isMultiInstance())
@@ -108,17 +75,76 @@ EnumeratedIP * IPEnumeration::getAddresses()
 			(UnsignedByte)(id));
 	}
 
-	// construct a list of addresses
-	int numAddresses = 0;
-	char *entry;
-	while ( (entry = hostEnt->h_addr_list[numAddresses++]) != nullptr )
+#ifdef _WIN32
+	// Windows path: resolve the local host name to its IP list via getaddrinfo.
+	// Covers retail hosts where the machine name answers in DNS/NetBIOS.
+	char hostname[256];
+	if (gethostname(hostname, sizeof(hostname)) != 0)
 	{
-		addNewIP(
-			(UnsignedByte)entry[0],
-			(UnsignedByte)entry[1],
-			(UnsignedByte)entry[2],
-			(UnsignedByte)entry[3]);
+		DEBUG_LOG(("Failed call to gethostname; WSAGetLastError returned %d", WSAGetLastError()));
+		return m_IPlist;
 	}
+	DEBUG_LOG(("Hostname is '%s'", hostname));
+
+	struct addrinfo hints;
+	memset(&hints, 0, sizeof(hints));
+	hints.ai_family = AF_INET;
+	hints.ai_socktype = SOCK_DGRAM;
+
+	struct addrinfo *res = nullptr;
+	if (getaddrinfo(hostname, nullptr, &hints, &res) != 0 || res == nullptr)
+	{
+		DEBUG_LOG(("getaddrinfo failed for hostname '%s'", hostname));
+		if (res != nullptr)
+			freeaddrinfo(res);
+		return m_IPlist;
+	}
+
+	for (struct addrinfo *p = res; p != nullptr; p = p->ai_next)
+	{
+		if (p->ai_family != AF_INET)
+			continue;
+		const sockaddr_in *sin = reinterpret_cast<const sockaddr_in *>(p->ai_addr);
+		const UnsignedInt ip = ntohl(sin->sin_addr.s_addr);
+		addNewIP(
+			(UnsignedByte)((ip >> 24) & 0xff),
+			(UnsignedByte)((ip >> 16) & 0xff),
+			(UnsignedByte)((ip >> 8) & 0xff),
+			(UnsignedByte)(ip & 0xff));
+	}
+	freeaddrinfo(res);
+#else
+	// POSIX path: walk local interfaces via getifaddrs(). Skip loopback; the
+	// synthetic 127.x block above already provides multi-instance loopbacks.
+	struct ifaddrs *ifaddr = nullptr;
+	if (getifaddrs(&ifaddr) != 0 || ifaddr == nullptr)
+	{
+		DEBUG_LOG(("getifaddrs failed (errno=%d)", errno));
+		if (ifaddr != nullptr)
+			freeifaddrs(ifaddr);
+		return m_IPlist;
+	}
+
+	for (struct ifaddrs *ifa = ifaddr; ifa != nullptr; ifa = ifa->ifa_next)
+	{
+		if (ifa->ifa_addr == nullptr)
+			continue;
+		if (ifa->ifa_addr->sa_family != AF_INET)
+			continue;
+		if ((ifa->ifa_flags & IFF_LOOPBACK) != 0)
+			continue;
+		if ((ifa->ifa_flags & IFF_UP) == 0)
+			continue;
+		const sockaddr_in *sin = reinterpret_cast<const sockaddr_in *>(ifa->ifa_addr);
+		const UnsignedInt ip = ntohl(sin->sin_addr.s_addr);
+		addNewIP(
+			(UnsignedByte)((ip >> 24) & 0xff),
+			(UnsignedByte)((ip >> 16) & 0xff),
+			(UnsignedByte)((ip >> 8) & 0xff),
+			(UnsignedByte)(ip & 0xff));
+	}
+	freeifaddrs(ifaddr);
+#endif
 
 	return m_IPlist;
 }
@@ -165,26 +191,13 @@ void IPEnumeration::addNewIP( UnsignedByte a, UnsignedByte b, UnsignedByte c, Un
 
 AsciiString IPEnumeration::getMachineName()
 {
-	if (!m_isWinsockInitialized)
-	{
-		WORD verReq = MAKEWORD(2, 2);
-		WSADATA wsadata;
-
-		int err = WSAStartup(verReq, &wsadata);
-		if (err != 0) {
-			return "";
-		}
-
-		if ((LOBYTE(wsadata.wVersion) != 2) || (HIBYTE(wsadata.wVersion) !=2)) {
-			WSACleanup();
-			return "";
-		}
-		m_isWinsockInitialized = true;
-	}
+	if (!NetworkInit::ensureStarted())
+		return "";
+	m_isWinsockInitialized = true;
 
 	// get the local machine's host name
 	char hostname[256];
-	if (gethostname(hostname, sizeof(hostname)))
+	if (gethostname(hostname, sizeof(hostname)) != 0)
 	{
 		DEBUG_LOG(("Failed call to gethostname; WSAGetLastError returned %d", WSAGetLastError()));
 		return "";
@@ -192,5 +205,3 @@ AsciiString IPEnumeration::getMachineName()
 
 	return AsciiString(hostname);
 }
-
-

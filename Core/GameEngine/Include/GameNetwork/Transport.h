@@ -79,7 +79,6 @@ public:
 
 	UnsignedShort m_port;
 private:
-	Bool m_winsockInit;
 	UDP *m_udpsock;
 
 	// Latency insertion and packet loss

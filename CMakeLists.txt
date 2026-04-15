@@ -66,6 +66,7 @@ endif()
 include(cmake/openal.cmake)
 include(cmake/ffmpeg.cmake)
 include(cmake/sdl3.cmake)
+include(cmake/curl.cmake)
 
 # Define a dummy stlport target when not on VC6.
 if (IS_VS6_BUILD)

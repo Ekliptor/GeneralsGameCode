@@ -17,33 +17,21 @@
 */
 
 // ftp.h : Declaration of the Cftp
+//
+// Phase 4: the internals of Cftp are now a libcurl multi-handle state
+// machine. The public API is unchanged so CDownload (Download.{h,cpp})
+// and Core/Tools/PATCHGET don't need to know anything changed.
 
 #pragma once
 
-//#include "../resource.h"       // main symbols
-
 #include <cstddef>
-#include <winsock.h>
+#include <cstdio>
+#include <Utility/hresult_compat.h>
 #include <Utility/stdio_adapter.h>
 
 #include "WWDownload/ftpdefs.h"
 
-// FTP server return codes.  See RFC 959
-
-#define FTPREPLY_SERVEROK		220
-#define FTPREPLY_PASSWORD		331
-#define FTPREPLY_LOGGEDIN		230
-#define FTPREPLY_PORTOK			200
-#define FTPREPLY_TYPEOK			200
-#define FTPREPLY_RESTARTOK		350
-#define FTPREPLY_CWDOK			250
-#define FTPREPLY_OPENASCII		150
-#define FTPREPLY_OPENBINARY		150
-#define FTPREPLY_COMPLETE		226
-#define FTPREPLY_CONTROLCLOSED	421
-
 // Temporary download file name
-
 #define FTP_TEMPFILENAME	"..\\__~DOWN_L~D"
 
 
@@ -51,18 +39,20 @@
 // Cftp
 class Cftp
 {
-private:
-	friend class CDownload;
-
-	int		m_iCommandSocket;							// Socket for commands
-	int		m_iDataSocket;								// Socket for data
-
-	struct sockaddr_in m_CommandSockAddr;				// Address for commands
-	struct sockaddr_in m_DataSockAddr;					// Address for data
-
+public:
+	// Progress counters — mutated by the libcurl write/xferinfo callbacks in
+	// FTP.cpp. Public so the callbacks don't need to be friends of Cftp.
 	int		m_iFilePos;									// Byte offset into file
 	int		m_iBytesRead;								// Number of bytes downloaded
 	int		m_iFileSize;								// Total size of the file
+
+private:
+	friend class CDownload;
+
+	// Legacy signal used by Download.cpp:PumpMessages() to decide whether
+	// the command channel is still open. With libcurl we just track whether
+	// we have an active easy handle attached to the multi.
+	int		m_iCommandSocket;
 	char	m_szRemoteFilePath[128];
 	char	m_szRemoteFileName[128];
 	char	m_szLocalFilePath[128];
@@ -73,22 +63,13 @@ private:
 	FILE *	m_pfLocalFile;
 	int		m_iStatus;
 
-	int		m_sendNewPortStatus;
-	int		m_findStart;
+	// libcurl multi/easy handles; void* so ftp.h doesn't pull curl/curl.h
+	// into every TU that includes Cftp.
+	void *	m_curlMulti;
+	void *	m_curlEasy;
 
-	int		SendData( char * pData, int iSize );
-	int		RecvData( char * pData, int iSize );
-	int		SendNewPort();
-	int		OpenDataConnection();
-	void		CloseDataConnection();
-	int		AsyncGetHostByName( char * szName, struct sockaddr_in &address );
-
-				// Convert a local filename into a temp filename to download into
-	void		GetDownloadFilename( const char* localname, char* downloadname, size_t downloadname_size);
-
-	void		CloseSockets();
-	void		ZeroStuff();
-
+	// Convert a local filename into a temp filename to download into
+	void	GetDownloadFilename(const char *localname, char *downloadname, size_t downloadname_size);
 
 public:
 	Cftp();
@@ -107,8 +88,4 @@ public:
 	HRESULT RestartFrom( int i ) { m_iFilePos = i; return FTP_SUCCEEDED;  };
 
 	HRESULT GetNextFileBlock( LPCSTR szLocalFileName, int * piTotalRead );
-
-	HRESULT RecvReply( LPCSTR pReplyBuffer, int iSize, int * piRetCode );
-	HRESULT SendCommand( LPCSTR pCommand, int iSize );
-
 };
