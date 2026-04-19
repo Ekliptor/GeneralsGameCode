@@ -127,6 +127,9 @@
 
 
 #include "hlod.h"
+
+#ifdef RTS_RENDERER_DX8
+
 #include "assetmgr.h"
 #include "hmdldef.h"
 #include "w3derr.h"
@@ -3642,4 +3645,6 @@ void HLodClass::Set_Hidden(int onoff)
 	Animatable3DObjClass::Set_Hidden(onoff);
 	return ;
 }
+
+#endif // RTS_RENDERER_DX8
 

@@ -17,6 +17,9 @@
 */
 
 #include "dx8rendererdebugger.h"
+
+#ifdef RTS_RENDERER_DX8
+
 #include "hashtemplate.h"
 #include "mesh.h"
 #include "meshmdl.h"
@@ -129,4 +132,6 @@ void DX8RendererDebugger::Enable_All()
 		ite.Peek_Value()->Set_Debugger_Disable(false);
 	}
 }
+
+#endif // RTS_RENDERER_DX8
 

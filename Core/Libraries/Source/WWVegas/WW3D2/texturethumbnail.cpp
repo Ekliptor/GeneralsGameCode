@@ -17,6 +17,7 @@
 */
 
 #include "texturethumbnail.h"
+#ifdef RTS_RENDERER_DX8
 #include "hashtemplate.h"
 #include "missingtexture.h"
 #include "TARGA.h"
@@ -408,3 +409,4 @@ void ThumbnailManagerClass::Deinit()
 	delete GlobalThumbnailManager;
 	GlobalThumbnailManager=nullptr;
 }
+#endif // RTS_RENDERER_DX8

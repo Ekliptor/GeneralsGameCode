@@ -51,6 +51,26 @@
 #include <algorithm>
 
 
+// Phase 5b: local D3DLIGHT8 conversion for Apply_Render_State.
+static D3DLIGHT8 To_D3DLIGHT8(const RenderLight& rl)
+{
+	D3DLIGHT8 d;
+	d.Type        = static_cast<D3DLIGHTTYPE>(rl.Type);
+	d.Diffuse     = { rl.Diffuse.X,  rl.Diffuse.Y,  rl.Diffuse.Z,  1.0f };
+	d.Specular    = { rl.Specular.X, rl.Specular.Y, rl.Specular.Z, 1.0f };
+	d.Ambient     = { rl.Ambient.X,  rl.Ambient.Y,  rl.Ambient.Z,  1.0f };
+	d.Position    = { rl.Position.X,  rl.Position.Y,  rl.Position.Z };
+	d.Direction   = { rl.Direction.X, rl.Direction.Y, rl.Direction.Z };
+	d.Range        = rl.Range;
+	d.Falloff      = rl.Falloff;
+	d.Attenuation0 = rl.Attenuation0;
+	d.Attenuation1 = rl.Attenuation1;
+	d.Attenuation2 = rl.Attenuation2;
+	d.Theta        = rl.Theta;
+	d.Phi          = rl.Phi;
+	return d;
+}
+
 bool SortingRendererClass::_EnableTriangleDraw=true;
 static unsigned DEFAULT_SORTING_POLY_COUNT = 16384;	// (count * 3) must be less than 65536
 static unsigned DEFAULT_SORTING_VERTEX_COUNT = 32768;	// count must be less than 65536
@@ -379,16 +399,12 @@ void SortingRendererClass::Insert_Triangles(
 	WWASSERT(vertex_buffer);
 	WWASSERT(state->vertex_count<=vertex_buffer->Get_Vertex_Count());
 
-	// WWMath column-vector `M*v` with D3DMATRIX bytes equals D3DX row-vector `v*M`
-	// via dot with column i of M — see docs/Phase0-RHI-Seam.md.
-	const Matrix4x4& worldBytes = reinterpret_cast<const Matrix4x4&>(state->sorting_state.world);
-	const Matrix4x4& viewBytes  = reinterpret_cast<const Matrix4x4&>(state->sorting_state.view);
-	const Matrix4x4 mtx = worldBytes * viewBytes;
+	const Matrix4x4 mtx = state->sorting_state.view * state->sorting_state.world;
 	const Vector3& vec = state->bounding_sphere.Center;
 	state->transformed_center = Vector3(
-		vec.X*mtx[0][0] + vec.Y*mtx[1][0] + vec.Z*mtx[2][0] + mtx[3][0],
-		vec.X*mtx[0][1] + vec.Y*mtx[1][1] + vec.Z*mtx[2][1] + mtx[3][1],
-		vec.X*mtx[0][2] + vec.Y*mtx[1][2] + vec.Z*mtx[2][2] + mtx[3][2]);
+		mtx[0][0]*vec.X + mtx[0][1]*vec.Y + mtx[0][2]*vec.Z + mtx[0][3],
+		mtx[1][0]*vec.X + mtx[1][1]*vec.Y + mtx[1][2]*vec.Z + mtx[1][3],
+		mtx[2][0]*vec.X + mtx[2][1]*vec.Y + mtx[2][2]*vec.Z + mtx[2][3]);
 
 
 	/// @todo lorenzen sez use a bucket sort here... and stop copying so much data so many times
@@ -499,37 +515,22 @@ static void Apply_Render_State(RenderStateStruct& render_state)
 		DX8Wrapper::Set_Texture(i,render_state.Textures[i]);
 	}
 
-	DX8Wrapper::_Set_DX8_Transform(D3DTS_WORLD,render_state.world);
-	DX8Wrapper::_Set_DX8_Transform(D3DTS_VIEW,render_state.view);
+	DX8Wrapper::_Set_DX8_Transform(D3DTS_WORLD,To_D3DMATRIX(render_state.world));
+	DX8Wrapper::_Set_DX8_Transform(D3DTS_VIEW,To_D3DMATRIX(render_state.view));
 
 
 	if (!render_state.material->Get_Lighting())
 		return;	//no point changing lights if they are ignored.
   //prevLight = render_state.lightsHash;
 
-	if (render_state.LightEnable[0]) {
-		DX8Wrapper::Set_DX8_Light(0,&render_state.Lights[0]);
-		if (render_state.LightEnable[1]) {
-			DX8Wrapper::Set_DX8_Light(1,&render_state.Lights[1]);
-			if (render_state.LightEnable[2]) {
-				DX8Wrapper::Set_DX8_Light(2,&render_state.Lights[2]);
-				if (render_state.LightEnable[3]) {
-					DX8Wrapper::Set_DX8_Light(3,&render_state.Lights[3]);
-				}
-				else {
-					DX8Wrapper::Set_DX8_Light(3,nullptr);
-				}
-			}
-			else {
-				DX8Wrapper::Set_DX8_Light(2,nullptr);
-			}
+	for (int li=0;li<4;++li) {
+		if (render_state.LightEnable[li]) {
+			D3DLIGHT8 d3dLight = To_D3DLIGHT8(render_state.Lights[li]);
+			DX8Wrapper::Set_DX8_Light(li,&d3dLight);
 		}
 		else {
-			DX8Wrapper::Set_DX8_Light(1,nullptr);
+			DX8Wrapper::Set_DX8_Light(li,nullptr);
 		}
-	}
-	else {
-		DX8Wrapper::Set_DX8_Light(0,nullptr);
 	}
 
 
@@ -574,13 +575,10 @@ void SortingRendererClass::Flush_Sorting_Pool()
 			src_verts+=state->sorting_state.index_base_offset;
 			src_verts+=state->min_vertex_index;
 
-			// Z-component of v transformed by world-then-view: dot with column 2 of the byte product.
-			const Matrix4x4& worldBytes = reinterpret_cast<const Matrix4x4&>(state->sorting_state.world);
-			const Matrix4x4& viewBytes  = reinterpret_cast<const Matrix4x4&>(state->sorting_state.view);
-			const Matrix4x4 mtx = worldBytes * viewBytes;
+			const Matrix4x4 mtx = state->sorting_state.view * state->sorting_state.world;
 			unsigned i=0;
 			for (;i<state->vertex_count;++i,++src_verts) {
-				vertex_z_array[i] = (mtx[0][2] * src_verts->x + mtx[1][2] * src_verts->y + mtx[2][2] * src_verts->z + mtx[3][2]);
+				vertex_z_array[i] = (mtx[2][0] * src_verts->x + mtx[2][1] * src_verts->y + mtx[2][2] * src_verts->z + mtx[2][3]);
 				*dest_verts++=*src_verts;
 			}
 
@@ -840,14 +838,12 @@ void SortingRendererClass::Insert_VolumeParticle(
 	WWASSERT(state->vertex_count<=vertex_buffer->Get_Vertex_Count());
 
 	// Transform the center point to view space for sorting.
-	const Matrix4x4& worldBytes = reinterpret_cast<const Matrix4x4&>(state->sorting_state.world);
-	const Matrix4x4& viewBytes  = reinterpret_cast<const Matrix4x4&>(state->sorting_state.view);
-	const Matrix4x4 mtx = worldBytes * viewBytes;
+	const Matrix4x4 mtx = state->sorting_state.view * state->sorting_state.world;
 	const Vector3& vec = state->bounding_sphere.Center;
 	state->transformed_center = Vector3(
-		vec.X*mtx[0][0] + vec.Y*mtx[1][0] + vec.Z*mtx[2][0] + mtx[3][0],
-		vec.X*mtx[0][1] + vec.Y*mtx[1][1] + vec.Z*mtx[2][1] + mtx[3][1],
-		vec.X*mtx[0][2] + vec.Y*mtx[1][2] + vec.Z*mtx[2][2] + mtx[3][2]);
+		mtx[0][0]*vec.X + mtx[0][1]*vec.Y + mtx[0][2]*vec.Z + mtx[0][3],
+		mtx[1][0]*vec.X + mtx[1][1]*vec.Y + mtx[1][2]*vec.Z + mtx[1][3],
+		mtx[2][0]*vec.X + mtx[2][1]*vec.Y + mtx[2][2]*vec.Z + mtx[2][3]);
 
 
 	// BUT WHAT IS THE DEAL WITH THE VERTCOUNT AND POLYCOUNT BEING N BUT TRANSFORMED CENTER COUNT == 1

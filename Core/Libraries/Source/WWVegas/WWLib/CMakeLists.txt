@@ -175,15 +175,18 @@ target_include_directories(core_wwlib PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
-target_precompile_headers(core_wwlib PRIVATE
+set(WWLIB_PCH_HEADERS
     [["Utility/CppMacros.h"]] # Must be first, to be removed when abandoning VC6
     always.h
     STLUtils.h
     win.h
     WWCommon.h
     wwstring.h
-    <windows.h>
 )
+if(WIN32)
+    list(APPEND WWLIB_PCH_HEADERS <windows.h>)
+endif()
+target_precompile_headers(core_wwlib PRIVATE ${WWLIB_PCH_HEADERS})
 
 target_link_libraries(core_wwlib PRIVATE
     core_wwcommon

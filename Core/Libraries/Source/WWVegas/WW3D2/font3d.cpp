@@ -38,6 +38,7 @@
  * - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
 #include "font3d.h"
+#ifdef RTS_RENDERER_DX8
 #include "assetmgr.h"
 #include "texture.h"
 #include <assert.h>
@@ -424,4 +425,5 @@ float	Font3DInstanceClass::String_Width( const char *test_str )
 
 	return width;
 }
+#endif // RTS_RENDERER_DX8
 

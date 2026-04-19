@@ -37,9 +37,23 @@
 #pragma once
 
 #include "always.h"
+#ifdef _WIN32
 #pragma warning (push, 3)
 #include "mss.h"
 #pragma warning (pop)
+#else
+// Stub Miles Sound System types for non-Windows builds (Phase 5d).
+typedef void* HDIGDRIVER;
+typedef void* HPROVIDER;
+typedef void* HSAMPLE;
+typedef void* H3DSAMPLE;
+typedef void* H3DPOBJECT;
+typedef void* HTIMER;
+typedef void* LPWAVEFORMAT;
+typedef int32_t S32;
+typedef uint32_t U32;
+#define AILCALLBACK
+#endif
 
 #include "Vector.h"
 #include "SoundBuffer.h"

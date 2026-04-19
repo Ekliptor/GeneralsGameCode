@@ -1,7 +1,7 @@
-# Build tools
+# Build tools (Windows-only — MFC/DirectX dependencies).
 
 # Build useful tool binaries.
-if(RTS_BUILD_GENERALS_TOOLS)
+if(RTS_BUILD_GENERALS_TOOLS AND WIN32)
     add_subdirectory(GUIEdit)
     add_subdirectory(ImagePacker)
     add_subdirectory(MapCacheBuilder)

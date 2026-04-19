@@ -35,6 +35,7 @@
  * - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
 #include "render2dsentence.h"
+#ifdef RTS_RENDERER_DX8
 #include "surfaceclass.h"
 #include "texture.h"
 #include "wwprofile.h"
@@ -1784,3 +1785,4 @@ FontCharsClass::Free_Character_Arrays ()
 
 	return ;
 }
+#endif // RTS_RENDERER_DX8

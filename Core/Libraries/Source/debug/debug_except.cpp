@@ -28,6 +28,9 @@
 //////////////////////////////////////////////////////////////////////////////
 #include "debug.h"
 #include "internal_except.h"
+
+#ifdef _WIN32
+
 #include <windows.h>
 #include <commctrl.h>
 
@@ -412,3 +415,5 @@ LONG __stdcall DebugExceptionhandler::ExceptionFilter(struct _EXCEPTION_POINTERS
   // Now die
   return EXCEPTION_EXECUTE_HANDLER;
 }
+
+#endif // _WIN32

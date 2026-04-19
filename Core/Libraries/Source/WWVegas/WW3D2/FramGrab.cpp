@@ -21,6 +21,7 @@
 //////////////////////////////////////////////////////////////////////
 
 #include "framgrab.h"
+#ifdef RTS_RENDERER_DX8
 #include <io.h>
 //#include <errno.h>
 
@@ -188,3 +189,4 @@ void FrameGrabClass::ConvertFrame(void *BitmapPointer)
 		}
 	}
 }
+#endif // RTS_RENDERER_DX8

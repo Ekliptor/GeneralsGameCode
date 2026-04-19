@@ -3,7 +3,7 @@ add_library(z_wwcommon INTERFACE)
 
 target_link_libraries(z_wwcommon INTERFACE
     core_wwcommon
-    d3d8lib
+    $<$<STREQUAL:${RTS_RENDERER_LOWER},dx8>:d3d8lib>
     milesstub
     stlport
 )

@@ -38,6 +38,7 @@
  * - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
 #include "texturefilter.h"
+#ifdef RTS_RENDERER_DX8
 #include "dx8wrapper.h"
 
 unsigned _MinTextureFilters[MAX_TEXTURE_STAGES][TextureFilterClass::FILTER_TYPE_COUNT];
@@ -319,3 +320,4 @@ void TextureFilterClass::_Set_Default_Mip_Filter(FilterType filter)
 		_MipMapFilters[i][FILTER_TYPE_DEFAULT]=_MipMapFilters[i][filter];
 	}
 }
+#endif // RTS_RENDERER_DX8

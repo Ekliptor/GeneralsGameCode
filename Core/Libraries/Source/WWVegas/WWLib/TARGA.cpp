@@ -64,8 +64,11 @@
 #ifndef TGA_USES_WWLIB_FILE_CLASSES
 #include "WWDebug/wwdebug.h"
 #endif
+#ifdef _WIN32
 #include <malloc.h>
-#include <memory.h>
+#endif
+#include <cstdlib>
+#include <cstring>
 #include "stringex.h"
 #ifdef TGA_USES_WWLIB_FILE_CLASSES
 #include "WWFILE.h"

@@ -246,3 +246,22 @@ target_link_libraries(corei_ww3d2 INTERFACE
     core_wwlib
     core_wwmath
 )
+
+# Phase 5d: When building with bgfx, put the compat/ directory on the include
+# path so that #include <d3d8.h> resolves to the portable D3D8 type shim
+# instead of the real Windows SDK header.
+if(RTS_RENDERER_LOWER STREQUAL "bgfx")
+    target_include_directories(corei_ww3d2 INTERFACE
+        ${CMAKE_CURRENT_SOURCE_DIR}/compat
+    )
+    # Phase 5h.2: dx8wrapper.cpp's bgfx stub branch calls into
+    # BgfxBootstrap::Ensure_Init / Shutdown to own the backend singleton's
+    # lifetime. Pull the BGFXDevice include dir in for the header, and link
+    # corei_bgfx so the symbols resolve in the consuming game target.
+    target_include_directories(corei_ww3d2 INTERFACE
+        ${CMAKE_SOURCE_DIR}/Core/GameEngineDevice/Include
+    )
+    target_link_libraries(corei_ww3d2 INTERFACE
+        corei_bgfx
+    )
+endif()

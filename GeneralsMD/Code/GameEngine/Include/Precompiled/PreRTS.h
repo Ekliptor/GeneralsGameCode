@@ -39,27 +39,38 @@ class STLSpecialAlloc;
 // different .cpp files, so I bit the bullet and included it here.
 // PLEASE DO NOT ABUSE WINDOWS OR IT WILL BE REMOVED ENTIRELY. :-)
 //--------------------------------------------------------------------------------- System Includes
+#ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 // Phase 3: atlbase.h / atl_compat.h retired from the game precompiled header —
 // the only consumer was the embedded IE browser (CComObject<W3DWebBrowser>),
 // which has been deleted. Tools that still use MFC/ATL include their own.
 #include <windows.h>
+#endif // _WIN32
 
 #include <assert.h>
 #include <ctype.h>
+#ifdef _WIN32
 #include <direct.h>
 #include <excpt.h>
+#endif
 #include <float.h>
 #include <Utility/fstream_adapter.h>
+#ifdef _WIN32
 #include <imagehlp.h>
+#endif
+#ifdef _WIN32
 #include <io.h>
+#endif
 #include <limits.h>
+#ifdef _WIN32
 #include <lmcons.h>
 #if defined(_MSC_VER) && _MSC_VER < 1300
 #include <mapicode.h>
 #endif
+#endif // _WIN32
 #include <math.h>
-#include <memory.h>
+#include <cstring>
+#ifdef _WIN32
 #include <mmsystem.h>
 #include <objbase.h>
 #include <ocidl.h>
@@ -68,24 +79,34 @@ class STLSpecialAlloc;
 #include <shlobj.h>
 #include <shlguid.h>
 #include <snmp.h>
+#endif // _WIN32
 #include <stdarg.h>
 #include <stddef.h>
 #include <stdlib.h>
 #include <sys/stat.h>
+#ifdef _WIN32
 #include <sys/timeb.h>
+#endif
 #include <sys/types.h>
+#ifdef _WIN32
 #include <tchar.h>
+#endif
 #include <time.h>
+#ifdef _WIN32
 #include <vfw.h>
 #include <winerror.h>
 #include <wininet.h>
 #include <winreg.h>
+#else
+#include "osdep.h"
+#endif
 
+#ifdef _WIN32
 #ifndef DIRECTINPUT_VERSION
 #	define DIRECTINPUT_VERSION	0x800
 #endif
-
 #include <dinput.h>
+#endif
 
 //------------------------------------------------------------------------------------ STL Includes
 // srj sez: no, include STLTypesdefs below, instead, thanks

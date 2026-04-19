@@ -39,6 +39,7 @@
 //#define INDEX_BUFFER_LOG
 
 #include "dx8indexbuffer.h"
+#ifdef RTS_RENDERER_DX8
 #include "dx8wrapper.h"
 #include "dx8caps.h"
 #include "sphere.h"
@@ -539,3 +540,4 @@ unsigned short DynamicIBAccessClass::Get_Default_Index_Count()
 {
 	return _DynamicDX8IndexBufferSize;
 }
+#endif // RTS_RENDERER_DX8

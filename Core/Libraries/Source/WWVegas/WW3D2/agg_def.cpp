@@ -34,6 +34,7 @@
 
 
 #include "agg_def.h"
+#ifdef RTS_RENDERER_DX8
 #include "htree.h"
 #include "w3derr.h"
 #include "chunkio.h"
@@ -892,4 +893,5 @@ AggregateLoaderClass::Load_W3D (ChunkLoadClass &chunk_load)
     // Return a pointer to the prototype
 	 return pprototype;
 }
+#endif // RTS_RENDERER_DX8
 

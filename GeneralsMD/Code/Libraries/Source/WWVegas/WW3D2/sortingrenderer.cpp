@@ -39,6 +39,9 @@
  * - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
 #include "sortingrenderer.h"
+
+#ifdef RTS_RENDERER_DX8
+
 #include "dx8vertexbuffer.h"
 #include "dx8indexbuffer.h"
 #include "dx8wrapper.h"
@@ -50,6 +53,26 @@
 #include <wwprofile.h>
 #include <algorithm>
 
+
+// Phase 5b: local D3DLIGHT8 conversion for Apply_Render_State.
+static D3DLIGHT8 To_D3DLIGHT8(const RenderLight& rl)
+{
+	D3DLIGHT8 d;
+	d.Type        = static_cast<D3DLIGHTTYPE>(rl.Type);
+	d.Diffuse     = { rl.Diffuse.X,  rl.Diffuse.Y,  rl.Diffuse.Z,  1.0f };
+	d.Specular    = { rl.Specular.X, rl.Specular.Y, rl.Specular.Z, 1.0f };
+	d.Ambient     = { rl.Ambient.X,  rl.Ambient.Y,  rl.Ambient.Z,  1.0f };
+	d.Position    = { rl.Position.X,  rl.Position.Y,  rl.Position.Z };
+	d.Direction   = { rl.Direction.X, rl.Direction.Y, rl.Direction.Z };
+	d.Range        = rl.Range;
+	d.Falloff      = rl.Falloff;
+	d.Attenuation0 = rl.Attenuation0;
+	d.Attenuation1 = rl.Attenuation1;
+	d.Attenuation2 = rl.Attenuation2;
+	d.Theta        = rl.Theta;
+	d.Phi          = rl.Phi;
+	return d;
+}
 
 bool SortingRendererClass::_EnableTriangleDraw=true;
 static unsigned DEFAULT_SORTING_POLY_COUNT = 16384;	// (count * 3) must be less than 65536
@@ -246,16 +269,12 @@ void SortingRendererClass::Insert_Triangles(
 	WWASSERT(vertex_buffer);
 	WWASSERT(state->vertex_count<=vertex_buffer->Get_Vertex_Count());
 
-	// WWMath column-vector `M*v` with D3DMATRIX bytes equals D3DX row-vector `v*M`
-	// via dot with column i of M — see docs/Phase0-RHI-Seam.md.
-	const Matrix4x4& worldBytes = reinterpret_cast<const Matrix4x4&>(state->sorting_state.world);
-	const Matrix4x4& viewBytes  = reinterpret_cast<const Matrix4x4&>(state->sorting_state.view);
-	const Matrix4x4 mtx = worldBytes * viewBytes;
+	const Matrix4x4 mtx = state->sorting_state.view * state->sorting_state.world;
 	const Vector3& vec = state->bounding_sphere.Center;
 	state->transformed_center = Vector3(
-		vec.X*mtx[0][0] + vec.Y*mtx[1][0] + vec.Z*mtx[2][0] + mtx[3][0],
-		vec.X*mtx[0][1] + vec.Y*mtx[1][1] + vec.Z*mtx[2][1] + mtx[3][1],
-		vec.X*mtx[0][2] + vec.Y*mtx[1][2] + vec.Z*mtx[2][2] + mtx[3][2]);
+		mtx[0][0]*vec.X + mtx[0][1]*vec.Y + mtx[0][2]*vec.Z + mtx[0][3],
+		mtx[1][0]*vec.X + mtx[1][1]*vec.Y + mtx[1][2]*vec.Z + mtx[1][3],
+		mtx[2][0]*vec.X + mtx[2][1]*vec.Y + mtx[2][2]*vec.Z + mtx[2][3]);
 
 
 	/// @todo lorenzen sez use a bucket sort here... and stop copying so much data so many times
@@ -366,37 +385,22 @@ static void Apply_Render_State(RenderStateStruct& render_state)
 		DX8Wrapper::Set_Texture(i,render_state.Textures[i]);
 	}
 
-	DX8Wrapper::_Set_DX8_Transform(D3DTS_WORLD,render_state.world);
-	DX8Wrapper::_Set_DX8_Transform(D3DTS_VIEW,render_state.view);
+	DX8Wrapper::_Set_DX8_Transform(D3DTS_WORLD,To_D3DMATRIX(render_state.world));
+	DX8Wrapper::_Set_DX8_Transform(D3DTS_VIEW,To_D3DMATRIX(render_state.view));
 
 
 	if (!render_state.material->Get_Lighting())
 		return;	//no point changing lights if they are ignored.
   //prevLight = render_state.lightsHash;
 
-	if (render_state.LightEnable[0]) {
-		DX8Wrapper::Set_DX8_Light(0,&render_state.Lights[0]);
-		if (render_state.LightEnable[1]) {
-			DX8Wrapper::Set_DX8_Light(1,&render_state.Lights[1]);
-			if (render_state.LightEnable[2]) {
-				DX8Wrapper::Set_DX8_Light(2,&render_state.Lights[2]);
-				if (render_state.LightEnable[3]) {
-					DX8Wrapper::Set_DX8_Light(3,&render_state.Lights[3]);
-				}
-				else {
-					DX8Wrapper::Set_DX8_Light(3,nullptr);
-				}
-			}
-			else {
-				DX8Wrapper::Set_DX8_Light(2,nullptr);
-			}
+	for (int li=0;li<4;++li) {
+		if (render_state.LightEnable[li]) {
+			D3DLIGHT8 d3dLight = To_D3DLIGHT8(render_state.Lights[li]);
+			DX8Wrapper::Set_DX8_Light(li,&d3dLight);
 		}
 		else {
-			DX8Wrapper::Set_DX8_Light(1,nullptr);
+			DX8Wrapper::Set_DX8_Light(li,nullptr);
 		}
-	}
-	else {
-		DX8Wrapper::Set_DX8_Light(0,nullptr);
 	}
 
 
@@ -443,9 +447,7 @@ void SortingRendererClass::Flush_Sorting_Pool()
 			memcpy(dest_verts, src_verts, sizeof(VertexFormatXYZNDUV2)*state->vertex_count);
 			dest_verts += state->vertex_count;
 
-			const Matrix4x4& worldBytes = reinterpret_cast<const Matrix4x4&>(state->sorting_state.world);
-			const Matrix4x4& viewBytes  = reinterpret_cast<const Matrix4x4&>(state->sorting_state.view);
-			const Matrix4x4 mtx = worldBytes * viewBytes;
+			const Matrix4x4 mtx = state->sorting_state.view * state->sorting_state.world;
 
 			unsigned short* indices=nullptr;
 			SortingIndexBufferClass* index_buffer=static_cast<SortingIndexBufferClass*>(state->sorting_state.index_buffer);
@@ -455,7 +457,7 @@ void SortingRendererClass::Flush_Sorting_Pool()
 			indices+=state->start_index;
 			indices+=state->sorting_state.iba_offset;
 
-			if (mtx[0][2] == 0.0f && mtx[1][2] == 0.0f && mtx[3][2] == 0.0f && mtx[2][2] == 1.0f) {
+			if (mtx[2][0] == 0.0f && mtx[2][1] == 0.0f && mtx[2][3] == 0.0f && mtx[2][2] == 1.0f) {
 				// The common case for particle systems.
 				for (int i=0;i<state->polygon_count;++i) {
 					unsigned short idx1=indices[i*3]-state->min_vertex_index;
@@ -495,9 +497,9 @@ void SortingRendererClass::Flush_Sorting_Pool()
 					tis_ptr->tri.j = idx2 + vertex_array_offset;
 					tis_ptr->tri.k = idx3 + vertex_array_offset;
 					tis_ptr->idx = node_id;
-					tis_ptr->z = (mtx[0][2]*(v1->x + v2->x + v3->x) +
-												mtx[1][2]*(v1->y + v2->y + v3->y) +
-												mtx[2][2]*(v1->z + v2->z + v3->z))/3.0f + mtx[3][2];
+					tis_ptr->z = (mtx[2][0]*(v1->x + v2->x + v3->x) +
+												mtx[2][1]*(v1->y + v2->y + v3->y) +
+												mtx[2][2]*(v1->z + v2->z + v3->z))/3.0f + mtx[2][3];
 					DEBUG_ASSERTCRASH((! _isnan(tis_ptr->z) && _finite(tis_ptr->z)), ("Triangle has invalid center"));
 				}
 			}
@@ -711,14 +713,12 @@ void SortingRendererClass::Insert_VolumeParticle(
 	WWASSERT(state->vertex_count<=vertex_buffer->Get_Vertex_Count());
 
 	// Transform the center point to view space for sorting.
-	const Matrix4x4& worldBytes = reinterpret_cast<const Matrix4x4&>(state->sorting_state.world);
-	const Matrix4x4& viewBytes  = reinterpret_cast<const Matrix4x4&>(state->sorting_state.view);
-	const Matrix4x4 mtx = worldBytes * viewBytes;
+	const Matrix4x4 mtx = state->sorting_state.view * state->sorting_state.world;
 	const Vector3& vec = state->bounding_sphere.Center;
 	state->transformed_center = Vector3(
-		vec.X*mtx[0][0] + vec.Y*mtx[1][0] + vec.Z*mtx[2][0] + mtx[3][0],
-		vec.X*mtx[0][1] + vec.Y*mtx[1][1] + vec.Z*mtx[2][1] + mtx[3][1],
-		vec.X*mtx[0][2] + vec.Y*mtx[1][2] + vec.Z*mtx[2][2] + mtx[3][2]);
+		mtx[0][0]*vec.X + mtx[0][1]*vec.Y + mtx[0][2]*vec.Z + mtx[0][3],
+		mtx[1][0]*vec.X + mtx[1][1]*vec.Y + mtx[1][2]*vec.Z + mtx[1][3],
+		mtx[2][0]*vec.X + mtx[2][1]*vec.Y + mtx[2][2]*vec.Z + mtx[2][3]);
 
 
 	// BUT WHAT IS THE DEAL WITH THE VERTCOUNT AND POLYCOUNT BEING N BUT TRANSFORMED CENTER COUNT == 1
@@ -740,3 +740,5 @@ void SortingRendererClass::Insert_VolumeParticle(
 	}
 	if (!node) sorted_list.Add_Tail(state);
 }
+
+#endif // RTS_RENDERER_DX8

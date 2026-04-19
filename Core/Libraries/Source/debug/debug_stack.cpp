@@ -29,8 +29,11 @@
 
 #include "debug.h"
 #include "debug_stack.h"
-#include <windows.h>
 #include "stringex.h"
+
+#ifdef _WIN32
+
+#include <windows.h>
 #include <imagehlp.h>
 
 // Definitions to allow run-time linking to the dbghelp.dll functions.
@@ -403,3 +406,5 @@ int DebugStackwalk::StackWalk(Signature &sig, struct _CONTEXT *ctx)
 
 	return sig.m_numAddr;
 }
+
+#endif // _WIN32

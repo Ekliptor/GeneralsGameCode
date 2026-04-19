@@ -18,6 +18,7 @@
 
 // 08/05/02 KM Texture class redesign
 #include "missingtexture.h"
+#ifdef RTS_RENDERER_DX8
 #include "texture.h"
 #include "dx8wrapper.h"
 #include <d3dx8core.h>
@@ -709,3 +710,4 @@ unsigned int missing_image_pixels[]={
 0xA7A7A7A7,0xA7A7A7A7,0xA7A7A7A7,0xA7A7A7A7,0xA7A7A7A7,0xA7A7A7A7,0xA7A7A7A7,0xA7A7A7A7,
 0xA7A7A7A7,0xA7A7A7A7,0xA7A7A7A7,0xA7A7A7A7,0xA7A7A7A7,0xA7A7A7A7,0xA7A7A7A7,0xA7A7A7A7,
 0xA7A7A7A7,0xA7A7A7A7,0xA7A7A7A7,0xA7A7A7A7,0xA7A7A7A7,0xA7A7A7A7,0x15151515,0x15151515};
+#endif // RTS_RENDERER_DX8

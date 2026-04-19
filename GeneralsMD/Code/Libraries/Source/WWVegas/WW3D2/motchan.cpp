@@ -45,6 +45,9 @@
 
 
 #include "motchan.h"
+
+#ifdef RTS_RENDERER_DX8
+
 #include "w3d_file.h"
 #include "chunkio.h"
 #include "Vector.h"
@@ -1311,3 +1314,5 @@ return;
 
 
 // EOF - motchan.cpp
+
+#endif // RTS_RENDERER_DX8

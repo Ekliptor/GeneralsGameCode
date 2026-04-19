@@ -7,7 +7,7 @@ target_compile_definitions(core_wwcommon INTERFACE
 )
 
 target_link_libraries(core_wwcommon INTERFACE
-    d3d8lib
+    $<$<STREQUAL:${RTS_RENDERER_LOWER},dx8>:d3d8lib>
     milesstub
     stlport
 )

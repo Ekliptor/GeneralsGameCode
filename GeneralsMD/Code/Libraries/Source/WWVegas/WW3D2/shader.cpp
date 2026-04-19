@@ -41,6 +41,7 @@
  * - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
 #include "shader.h"
+#ifdef RTS_RENDERER_DX8
 #include "w3d_file.h"
 #include "wwdebug.h"
 #include "dx8wrapper.h"
@@ -1259,4 +1260,5 @@ const StringClass& ShaderClass::Get_Description(StringClass& str) const
 	}
 	return str;
 }
+#endif // RTS_RENDERER_DX8
 

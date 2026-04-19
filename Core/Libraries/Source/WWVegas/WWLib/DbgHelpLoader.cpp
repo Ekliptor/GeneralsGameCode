@@ -18,9 +18,10 @@
 
 #include "DbgHelpLoader.h"
 
-
 DbgHelpLoader* DbgHelpLoader::Inst = nullptr;
 CriticalSectionClass DbgHelpLoader::CriticalSection;
+
+#ifdef _WIN32
 
 DbgHelpLoader::DbgHelpLoader()
 	: m_symInitialize(nullptr)
@@ -360,3 +361,17 @@ BOOL DbgHelpLoader::miniDumpWriteDump(
 	return FALSE;
 }
 #endif
+
+#else // !_WIN32
+
+// Stubs for non-Windows platforms.
+DbgHelpLoader::DbgHelpLoader() : m_referenceCount(0), m_failed(false), m_loadedFromSystem(false) {}
+DbgHelpLoader::~DbgHelpLoader() {}
+bool DbgHelpLoader::isLoaded() { return false; }
+bool DbgHelpLoader::isLoadedFromSystem() { return false; }
+bool DbgHelpLoader::isFailed() { return true; }
+bool DbgHelpLoader::load() { return false; }
+void DbgHelpLoader::unload() {}
+void DbgHelpLoader::freeResources() {}
+
+#endif // _WIN32

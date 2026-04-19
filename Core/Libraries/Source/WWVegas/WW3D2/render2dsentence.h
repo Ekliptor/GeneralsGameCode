@@ -120,12 +120,14 @@ private:
 	int									PixelOverlap;
 	int									PointSize;
 	StringClass							GDIFontName;
+#ifdef _WIN32
 	HFONT									OldGDIFont;
 	HBITMAP								OldGDIBitmap;
 	HBITMAP								GDIBitmap;
 	HFONT									GDIFont;
 	uint8 *								GDIBitmapBits;
 	HDC									MemDC;
+#endif
 	FontCharsClassCharDataStruct *					ASCIICharArray[256];
 	FontCharsClassCharDataStruct **					UnicodeCharArray;
 	uint16								FirstUnicodeChar;

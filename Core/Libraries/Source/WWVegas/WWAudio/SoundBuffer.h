@@ -36,9 +36,11 @@
 
 #pragma once
 
+#ifdef _WIN32
 #pragma warning (push, 3)
 #include "mss.h"
 #pragma warning (pop)
+#endif
 
 #include "always.h"
 

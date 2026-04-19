@@ -29,16 +29,20 @@ target_include_directories(core_debug INTERFACE
     ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
-target_precompile_headers(core_debug PRIVATE
+set(DEBUG_PCH_HEADERS
     [["Utility/CppMacros.h"]] # Must be first, to be removed when abandoning VC6
     "debug.h"
     "internal.h"
     "internal_except.h"
     "internal_io.h"
-    <windows.h>
 )
+if(WIN32)
+    list(APPEND DEBUG_PCH_HEADERS <windows.h>)
+endif()
+target_precompile_headers(core_debug PRIVATE ${DEBUG_PCH_HEADERS})
 
 target_link_libraries(core_debug PRIVATE
+    core_utility
     core_wwcommon
     corei_always
 )

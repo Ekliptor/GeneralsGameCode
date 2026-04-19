@@ -40,12 +40,12 @@
 //#define VERTEX_BUFFER_LOG
 
 #include "dx8vertexbuffer.h"
+#ifdef RTS_RENDERER_DX8
 #include "dx8wrapper.h"
 #include "dx8fvf.h"
 #include "dx8caps.h"
 #include "thread.h"
 #include "wwmemlog.h"
-#include <d3dx8core.h>
 
 #define DEFAULT_VB_SIZE 5000
 
@@ -907,4 +907,5 @@ unsigned short DynamicVBAccessClass::Get_Default_Vertex_Count()
 {
 	return _DynamicDX8VertexBufferSize;
 }
+#endif // RTS_RENDERER_DX8
 

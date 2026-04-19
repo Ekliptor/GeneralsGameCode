@@ -93,6 +93,14 @@ public:
 									float m41,float m42,float m43,float m44 );
 
 	/*
+	** Factory methods for common transform matrices.
+	** These produce the same byte layout as D3DXMatrixTranslation / D3DXMatrixScaling
+	** (translation in Row[3], scaling on diagonal).
+	*/
+	static WWINLINE Matrix4x4 Make_Translation(float x, float y, float z);
+	static WWINLINE Matrix4x4 Make_Scale(float sx, float sy, float sz);
+
+	/*
 	** Projection matrices.  The znear and zfar parameters are positive values indicating the
 	** distance from the camera to the z clipping planes.  See implementations for more info.
 	*/
@@ -295,6 +303,26 @@ WWINLINE void Matrix4x4::Make_Identity()
 	Row[1].Set(0.0,1.0,0.0,0.0);
 	Row[2].Set(0.0,0.0,1.0,0.0);
 	Row[3].Set(0.0,0.0,0.0,1.0);
+}
+
+WWINLINE Matrix4x4 Matrix4x4::Make_Translation(float x, float y, float z)
+{
+	Matrix4x4 m;
+	m.Row[0].Set(1.0f, 0.0f, 0.0f, 0.0f);
+	m.Row[1].Set(0.0f, 1.0f, 0.0f, 0.0f);
+	m.Row[2].Set(0.0f, 0.0f, 1.0f, 0.0f);
+	m.Row[3].Set(x, y, z, 1.0f);
+	return m;
+}
+
+WWINLINE Matrix4x4 Matrix4x4::Make_Scale(float sx, float sy, float sz)
+{
+	Matrix4x4 m;
+	m.Row[0].Set(sx, 0.0f, 0.0f, 0.0f);
+	m.Row[1].Set(0.0f, sy, 0.0f, 0.0f);
+	m.Row[2].Set(0.0f, 0.0f, sz, 0.0f);
+	m.Row[3].Set(0.0f, 0.0f, 0.0f, 1.0f);
+	return m;
 }
 
 

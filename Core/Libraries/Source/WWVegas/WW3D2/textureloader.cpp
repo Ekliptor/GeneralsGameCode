@@ -39,6 +39,7 @@
  * - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
 #include "textureloader.h"
+#ifdef RTS_RENDERER_DX8
 #include "mutex.h"
 #include "thread.h"
 #include "wwdebug.h"
@@ -2817,3 +2818,4 @@ unsigned int VolumeTextureLoadTaskClass::Get_Locked_Volume_Slice_Pitch(unsigned 
 	WWASSERT(LockedSurfacePtr[level]);
 	return LockedSurfaceSlicePitch[level];
 }
+#endif // RTS_RENDERER_DX8

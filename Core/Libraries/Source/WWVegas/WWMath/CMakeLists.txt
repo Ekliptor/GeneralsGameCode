@@ -85,6 +85,14 @@ set_target_properties(core_wwmath PROPERTIES OUTPUT_NAME wwmath)
 
 target_sources(core_wwmath PRIVATE ${WWMATH_SRC})
 
+# Phase 5d: WWMath sources (matrix3d.cpp, matrix4.cpp) include <d3d8types.h>.
+# For bgfx builds, provide the portable shim via the WW3D2/compat directory.
+if(RTS_RENDERER_LOWER STREQUAL "bgfx")
+    target_include_directories(core_wwmath PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/../WW3D2/compat
+    )
+endif()
+
 target_link_libraries(core_wwmath PRIVATE
     core_wwcommon
     corei_always

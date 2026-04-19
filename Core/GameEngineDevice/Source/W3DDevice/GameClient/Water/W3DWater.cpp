@@ -44,7 +44,6 @@
 #include "scene.h"
 #include "dx8wrapper.h"
 #include "light.h"
-#include "d3dx8math.h"
 #include "simplevec.h"
 #include "mesh.h"
 #include "matinfo.h"
@@ -237,16 +236,13 @@ void WaterRenderObjClass::setupJbaWaterShader()
 		DX8Wrapper::Set_DX8_Texture_Stage_State(2,  D3DTSS_ADDRESSU, D3DTADDRESS_WRAP);
 		DX8Wrapper::Set_DX8_Texture_Stage_State(2,  D3DTSS_ADDRESSV, D3DTADDRESS_WRAP);
 
-		D3DXMATRIX curView;
+		Matrix4x4 curView;
 		DX8Wrapper::_Get_DX8_Transform(D3DTS_VIEW, curView);
-		D3DXMATRIX inv;
-		float det;
-		D3DXMatrixInverse(&inv, &det, &curView);
-		D3DXMATRIX scale;
-		D3DXMatrixScaling(&scale, NOISE_REPEAT_FACTOR, NOISE_REPEAT_FACTOR,1);
-		D3DXMATRIX destMatrix = inv * scale;
-		D3DXMatrixTranslation(&scale, m_riverVOrigin, m_riverVOrigin,0);
-		destMatrix = destMatrix*scale;
+		Matrix4x4 inv = curView.Inverse();
+		Matrix4x4 scale = Matrix4x4::Make_Scale(NOISE_REPEAT_FACTOR, NOISE_REPEAT_FACTOR, 1);
+		Matrix4x4 destMatrix = inv * scale;
+		scale = Matrix4x4::Make_Translation(m_riverVOrigin, m_riverVOrigin, 0);
+		destMatrix = destMatrix * scale;
 		DX8Wrapper::_Set_DX8_Transform(D3DTS_TEXTURE2, destMatrix);
 
 	}
@@ -259,7 +255,8 @@ void WaterRenderObjClass::setupJbaWaterShader()
 	m_pDev->SetTextureStageState( 3, D3DTSS_MINFILTER, D3DTEXF_LINEAR );
 	m_pDev->SetTextureStageState( 3, D3DTSS_MAGFILTER, D3DTEXF_LINEAR );
 	if (m_riverWaterPixelShader){
-		DX8Wrapper::_Get_D3D_Device8()->SetPixelShaderConstant(0,   D3DXVECTOR4(REFLECTION_FACTOR, REFLECTION_FACTOR, REFLECTION_FACTOR, 1.0f), 1);
+		Vector4 reflFactor(REFLECTION_FACTOR, REFLECTION_FACTOR, REFLECTION_FACTOR, 1.0f);
+		DX8Wrapper::_Get_D3D_Device8()->SetPixelShaderConstant(0, &reflFactor, 1);
 		DX8Wrapper::_Get_D3D_Device8()->SetPixelShader(m_riverWaterPixelShader);
 	}
 }
@@ -900,6 +897,7 @@ void WaterRenderObjClass::ReAcquireResources()
 	if (m_waterTrackSystem)
 		m_waterTrackSystem->ReAcquireResources();
 
+#ifdef _WIN32
 	if (W3DShaderManager::getChipset() >= DC_GENERIC_PIXEL_SHADER_1_1)
 	{
 		ID3DXBuffer *compiledShader;
@@ -948,6 +946,7 @@ void WaterRenderObjClass::ReAcquireResources()
 			compiledShader->Release();
 		}
 	}
+#endif
 
 	//W3D Invalidate textures after losing the device and since we peek at the textures directly, it won't
 	//know to reinit them for us.  Do it here manually:
@@ -1600,22 +1599,19 @@ void WaterRenderObjClass::Render(RenderInfoClass & rinfo)
 				/**************************************************************************************/
 
 				//get current view matrix
-				D3DXMATRIX curView;
+				Matrix4x4 curView;
 				DX8Wrapper::_Get_DX8_Transform(D3DTS_VIEW, curView);
 
 				//get inverse of view matrix(= view to world matrix)
-				D3DXMATRIX inv;
-				Real det;
-				D3DXMatrixInverse(&inv, &det, &curView);
+				Matrix4x4 inv = curView.Inverse();
 
 				//create clipping matrix by inserting our plane equation into the 1st column
-				D3DXMATRIX clipMatrix;
-				D3DXMatrixIdentity(&clipMatrix);
-				clipMatrix(0,0)=WaterNormal.X;
-				clipMatrix(1,0)=WaterNormal.Y;
-				clipMatrix(2,0)=WaterNormal.Z;
-				clipMatrix(3,0)=WaterPlane.W+0.5f;
-				inv *=clipMatrix;
+				Matrix4x4 clipMatrix(true);
+				clipMatrix[0][0]=WaterNormal.X;
+				clipMatrix[1][0]=WaterNormal.Y;
+				clipMatrix[2][0]=WaterNormal.Z;
+				clipMatrix[3][0]=WaterPlane.W+0.5f;
+				inv = inv * clipMatrix;
 
 				// Change texture wrapping mode to 'clamp' for texture stage 1
 				DX8Wrapper::Set_DX8_Texture_Stage_State( 1, D3DTSS_ADDRESSU, D3DTADDRESS_CLAMP);
@@ -1783,14 +1779,14 @@ void WaterRenderObjClass::drawSea(RenderInfoClass & rinfo)
 	if (!getClippedWaterPlane(&rinfo.Camera,&seaBox))
 		return;	//the sea is not visible
 
-	D3DXMATRIX matProj, matView, matWW3D;
+	Matrix4x4 matProj, matView, matWW3D;
 
 	//create a transform which will flip the y and z coordinates to fit our system
-	memset(&matWW3D,0,sizeof(D3DMATRIX));
-	matWW3D._11=1.0f;
-	matWW3D._32=1.0f;
-	matWW3D._23=1.0f;
-	matWW3D._44=1.0f;
+	memset(&matWW3D, 0, sizeof(Matrix4x4));
+	matWW3D[0][0]=1.0f;
+	matWW3D[2][1]=1.0f;
+	matWW3D[1][2]=1.0f;
+	matWW3D[3][3]=1.0f;
 
 	DX8Wrapper::Set_Transform(D3DTS_WORLD,Transform);	//position the water surface
 	DX8Wrapper::Set_Texture(0,nullptr);	//we'll be setting our own textures, so reset W3D
@@ -1859,19 +1855,21 @@ void WaterRenderObjClass::drawSea(RenderInfoClass & rinfo)
 
 	m_pDev->SetRenderState(D3DRS_ZWRITEENABLE , FALSE);
 
-	D3DXMATRIX mat;
-	memset(&mat,0,sizeof(D3DXMATRIX));
+	Matrix4x4 mat;
+	memset(&mat, 0, sizeof(Matrix4x4));
 
-	mat._11 = 0.5f; mat._12 = -0.5f; mat._13 = 0.5f;   mat._14=0.5f;
-	mat._21 = 0.5f; mat._22 = 0.5f; mat._23 = 0.0f;   mat._24=0.0f;
-	mat._31 = 0.0f; mat._32 = 0.0f; mat._33 = 0.0f;   mat._34=1.0f;
-	mat._41 = 0.0f; mat._42 = 0.0f; mat._43 = 0.0f;   mat._44=1.0f;
+	mat[0][0] = 0.5f; mat[0][1] = -0.5f; mat[0][2] = 0.5f;   mat[0][3]=0.5f;
+	mat[1][0] = 0.5f; mat[1][1] = 0.5f; mat[1][2] = 0.0f;   mat[1][3]=0.0f;
+	mat[2][0] = 0.0f; mat[2][1] = 0.0f; mat[2][2] = 0.0f;   mat[2][3]=1.0f;
+	mat[3][0] = 0.0f; mat[3][1] = 0.0f; mat[3][2] = 0.0f;   mat[3][3]=1.0f;
 
 	m_pDev->SetVertexShaderConstant(CV_TEXPROJ_0, &mat, 4);
 
 	// Setup constants
-	m_pDev->SetVertexShaderConstant(CV_ZERO,   D3DXVECTOR4(0.0f, 0.0f, 0.0f, 0.0f), 1);
-	m_pDev->SetVertexShaderConstant(CV_ONE,    D3DXVECTOR4(1.0f, 1.0f, 1.0f, 1.0f), 1);
+	Vector4 cvZero(0.0f, 0.0f, 0.0f, 0.0f);
+	Vector4 cvOne(1.0f, 1.0f, 1.0f, 1.0f);
+	m_pDev->SetVertexShaderConstant(CV_ZERO, &cvZero, 1);
+	m_pDev->SetVertexShaderConstant(CV_ONE, &cvOne, 1);
 
 	m_pDev->SetVertexShader(m_dwWaveVertexShader);
 	m_pDev->SetPixelShader(m_dwWavePixelShader);
@@ -1890,12 +1888,12 @@ void WaterRenderObjClass::drawSea(RenderInfoClass & rinfo)
 
 	Int patchX,patchY,startX,startY;
 
-	D3DXMATRIX patchMatrix;
-	memset(&patchMatrix,0,sizeof(D3DXMATRIX));
-	patchMatrix._11=PATCH_SCALE;
-	patchMatrix._22=1.0f;
-	patchMatrix._33=PATCH_SCALE;
-	patchMatrix._44=1.0f;
+	Matrix4x4 patchMatrix;
+	memset(&patchMatrix, 0, sizeof(Matrix4x4));
+	patchMatrix[0][0]=PATCH_SCALE;
+	patchMatrix[1][1]=1.0f;
+	patchMatrix[2][2]=PATCH_SCALE;
+	patchMatrix[3][3]=1.0f;
 
 	m_pDev->SetStreamSource(0,m_vertexBufferD3D,sizeof(WaterRenderObjClass::SEA_PATCH_VERTEX));
 	m_pDev->SetIndices(m_indexBufferD3D,0);
@@ -1904,16 +1902,16 @@ void WaterRenderObjClass::drawSea(RenderInfoClass & rinfo)
 	{
 		for (startX=patchX=(seaBox.Center.X-seaBox.Extent.X)/(PATCH_WIDTH*PATCH_SCALE); (patchX*PATCH_WIDTH*PATCH_SCALE)<(seaBox.Center.X+seaBox.Extent.X); patchX++)
 		{
-			D3DXMATRIX matWorldViewProj, matTemp, matTempWorld;
-			patchMatrix._41=(float)(patchX*PATCH_WIDTH*PATCH_SCALE );
-			patchMatrix._43=(float)(patchY*PATCH_WIDTH*PATCH_SCALE );
+			Matrix4x4 matWorldViewProj, matTemp, matTempWorld;
+			patchMatrix[3][0]=(float)(patchX*PATCH_WIDTH*PATCH_SCALE );
+			patchMatrix[3][2]=(float)(patchY*PATCH_WIDTH*PATCH_SCALE );
 			//convert the default D3D coordinate system into ours
-			D3DXMatrixMultiply(&matTempWorld, &patchMatrix, &matWW3D);
+			matTempWorld = patchMatrix * matWW3D;
 
-			D3DXMatrixMultiply(&matTemp, &matTempWorld, &matView);
-			D3DXMatrixMultiply(&matWorldViewProj, &matTemp, &matProj);
+			matTemp = matTempWorld * matView;
+			matWorldViewProj = matTemp * matProj;
 			//matrices must be transposed before loading into vertex shader registers
-			D3DXMatrixTranspose(&matWorldViewProj, &matWorldViewProj);
+			matWorldViewProj = matWorldViewProj.Transpose();
 			m_pDev->SetVertexShaderConstant(CV_WORLDVIEWPROJ_0, &matWorldViewProj, 4);	//pass transform matrix into shader
 
 			m_pDev->DrawIndexedPrimitive(D3DPT_TRIANGLESTRIP,0,m_numVertices,0,m_numIndices);
@@ -1963,11 +1961,11 @@ void WaterRenderObjClass::drawSea(RenderInfoClass & rinfo)
 		{
 			for (startX=patchX=(seaBox.Center.X-seaBox.Extent.X)/(PATCH_WIDTH*PATCH_SCALE); (patchX*PATCH_WIDTH*PATCH_SCALE)<(seaBox.Center.X+seaBox.Extent.X); patchX++)
 			{
-				D3DXMATRIX matTemp;
-				patchMatrix._41=(float)(patchX*PATCH_WIDTH*PATCH_SCALE);
-				patchMatrix._43=(float)(patchY*PATCH_WIDTH*PATCH_SCALE);
+				Matrix4x4 matTemp;
+				patchMatrix[3][0]=(float)(patchX*PATCH_WIDTH*PATCH_SCALE);
+				patchMatrix[3][2]=(float)(patchY*PATCH_WIDTH*PATCH_SCALE);
 
-				D3DXMatrixMultiply(&matTemp, &patchMatrix, &matWW3D);
+				matTemp = patchMatrix * matWW3D;
 
 				DX8Wrapper::_Set_DX8_Transform(D3DTS_WORLD, matTemp);
 
@@ -2999,16 +2997,13 @@ void WaterRenderObjClass::setupFlatWaterShader()
 		DX8Wrapper::Set_DX8_Texture_Stage_State(2,  D3DTSS_ADDRESSU, D3DTADDRESS_WRAP);
 		DX8Wrapper::Set_DX8_Texture_Stage_State(2,  D3DTSS_ADDRESSV, D3DTADDRESS_WRAP);
 
-		D3DXMATRIX curView;
+		Matrix4x4 curView;
 		DX8Wrapper::_Get_DX8_Transform(D3DTS_VIEW, curView);
-		D3DXMATRIX inv;
-		float det;
-		D3DXMatrixInverse(&inv, &det, &curView);
-		D3DXMATRIX scale;
-		D3DXMatrixScaling(&scale, NOISE_REPEAT_FACTOR, NOISE_REPEAT_FACTOR,1);
-		D3DXMATRIX destMatrix = inv * scale;
-		D3DXMatrixTranslation(&scale, m_riverVOrigin, m_riverVOrigin,0);
-		destMatrix = destMatrix*scale;
+		Matrix4x4 inv = curView.Inverse();
+		Matrix4x4 scale = Matrix4x4::Make_Scale(NOISE_REPEAT_FACTOR, NOISE_REPEAT_FACTOR, 1);
+		Matrix4x4 destMatrix = inv * scale;
+		scale = Matrix4x4::Make_Translation(m_riverVOrigin, m_riverVOrigin, 0);
+		destMatrix = destMatrix * scale;
 		DX8Wrapper::_Set_DX8_Transform(D3DTS_TEXTURE2, destMatrix);
 
 	}
@@ -3019,7 +3014,8 @@ void WaterRenderObjClass::setupFlatWaterShader()
 	m_pDev->SetTextureStageState( 2, D3DTSS_MINFILTER, D3DTEXF_LINEAR );
 	m_pDev->SetTextureStageState( 2, D3DTSS_MAGFILTER, D3DTEXF_LINEAR );
 	if (m_trapezoidWaterPixelShader){
-		DX8Wrapper::_Get_D3D_Device8()->SetPixelShaderConstant(0,   D3DXVECTOR4(REFLECTION_FACTOR, REFLECTION_FACTOR, REFLECTION_FACTOR, 1.0f), 1);
+		Vector4 reflFactor(REFLECTION_FACTOR, REFLECTION_FACTOR, REFLECTION_FACTOR, 1.0f);
+		DX8Wrapper::_Get_D3D_Device8()->SetPixelShaderConstant(0, &reflFactor, 1);
 		DX8Wrapper::_Get_D3D_Device8()->SetPixelShader(m_trapezoidWaterPixelShader);
 	}
 }

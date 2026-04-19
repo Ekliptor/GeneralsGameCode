@@ -32,9 +32,12 @@
 #include "internal_except.h"
 #include "internal_io.h"
 #include <stdlib.h>
+#include <new>      // needed for placement new prototype
+
+#ifdef _WIN32
+
 #include <windows.h>
 #include <WWCommon.h>
-#include <new>      // needed for placement new prototype
 
 // a little dummy variable that makes the linker actually include
 // us...
@@ -1683,3 +1686,5 @@ void __cdecl _heap_abort()
 {
   DCRASH_RELEASE("Fatal heap error.");
 }
+
+#endif // _WIN32

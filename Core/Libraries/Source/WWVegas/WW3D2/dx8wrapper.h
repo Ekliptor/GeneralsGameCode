@@ -45,6 +45,7 @@
 #include "dllist.h"
 #include "d3d8.h"
 #include "matrix4.h"
+#include "RenderLight.h"
 #include "statistics.h"
 #include "wwstring.h"
 #include "lightenvironment.h"
@@ -140,20 +141,31 @@ void Log_DX8_ErrorCode(unsigned res);
 
 WWINLINE void DX8_ErrorCode(unsigned res)
 {
+#ifdef RTS_RENDERER_DX8
 	if (res==D3D_OK) return;
 	Log_DX8_ErrorCode(res);
+#else
+	(void)res;
+#endif
 }
 
-#ifdef WWDEBUG
-#define DX8CALL_HRES(x,res) DX8_Assert(); res = DX8Wrapper::_Get_D3D_Device8()->x; DX8_ErrorCode(res); DX8Wrapper::Increment_DX8_CallCount();
-#define DX8CALL(x) DX8_Assert(); DX8_ErrorCode(DX8Wrapper::_Get_D3D_Device8()->x); DX8Wrapper::Increment_DX8_CallCount();
-#define DX8CALL_D3D(x) DX8_Assert(); DX8_ErrorCode(DX8Wrapper::_Get_D3D8()->x); DX8Wrapper::Increment_DX8_CallCount();
-#define DX8_THREAD_ASSERT() if (_DX8SingleThreaded) { WWASSERT_PRINT(DX8Wrapper::_Get_Main_Thread_ID()==ThreadClass::_Get_Current_Thread_ID(),"DX8Wrapper::DX8 calls must be called from the main thread!"); }
-#else
-#define DX8CALL_HRES(x,res) res = DX8Wrapper::_Get_D3D_Device8()->x; DX8Wrapper::Increment_DX8_CallCount();
-#define DX8CALL(x) DX8Wrapper::_Get_D3D_Device8()->x; DX8Wrapper::Increment_DX8_CallCount();
-#define DX8CALL_D3D(x) DX8Wrapper::_Get_D3D8()->x; DX8Wrapper::Increment_DX8_CallCount();
-#define DX8_THREAD_ASSERT() ;
+#ifdef RTS_RENDERER_DX8
+ #ifdef WWDEBUG
+ #define DX8CALL_HRES(x,res) DX8_Assert(); res = DX8Wrapper::_Get_D3D_Device8()->x; DX8_ErrorCode(res); DX8Wrapper::Increment_DX8_CallCount();
+ #define DX8CALL(x) DX8_Assert(); DX8_ErrorCode(DX8Wrapper::_Get_D3D_Device8()->x); DX8Wrapper::Increment_DX8_CallCount();
+ #define DX8CALL_D3D(x) DX8_Assert(); DX8_ErrorCode(DX8Wrapper::_Get_D3D8()->x); DX8Wrapper::Increment_DX8_CallCount();
+ #define DX8_THREAD_ASSERT() if (_DX8SingleThreaded) { WWASSERT_PRINT(DX8Wrapper::_Get_Main_Thread_ID()==ThreadClass::_Get_Current_Thread_ID(),"DX8Wrapper::DX8 calls must be called from the main thread!"); }
+ #else
+ #define DX8CALL_HRES(x,res) res = DX8Wrapper::_Get_D3D_Device8()->x; DX8Wrapper::Increment_DX8_CallCount();
+ #define DX8CALL(x) DX8Wrapper::_Get_D3D_Device8()->x; DX8Wrapper::Increment_DX8_CallCount();
+ #define DX8CALL_D3D(x) DX8Wrapper::_Get_D3D8()->x; DX8Wrapper::Increment_DX8_CallCount();
+ #define DX8_THREAD_ASSERT() ;
+ #endif
+#else // bgfx or other non-DX8 renderer — all D3D device calls become no-ops
+ #define DX8CALL_HRES(x,res) ((void)0)
+ #define DX8CALL(x) ((void)0)
+ #define DX8CALL_D3D(x) ((void)0)
+ #define DX8_THREAD_ASSERT() ((void)0)
 #endif
 
 
@@ -198,10 +210,15 @@ struct RenderStateStruct
 	ShaderClass shader;
 	VertexMaterialClass* material;
 	TextureBaseClass * Textures[MAX_TEXTURE_STAGES];
-	D3DLIGHT8 Lights[4];
+	RenderLight Lights[4];
 	bool LightEnable[4];
-	D3DMATRIX world;
-	D3DMATRIX view;
+	Matrix4x4 world;
+	Matrix4x4 view;
+	// Phase 5h.5 — projection is captured here in both DX8 and bgfx builds.
+	// The DX8 inline Set_Transform still fires its DX8CALL(SetTransform(
+	// D3DTS_PROJECTION, …)) side effect; the capture gives the bgfx
+	// Apply_Render_State_Changes a home to read from.
+	Matrix4x4 projection;
 	unsigned vertex_buffer_types[MAX_VERTEX_STREAMS];
 	unsigned index_buffer_type;
 	unsigned short vba_offset;
@@ -244,6 +261,10 @@ class DX8Wrapper
 		INDEX_BUFFER_CHANGED = 1 << 17,
 		WORLD_IDENTITY=	1<<18,
 		VIEW_IDENTITY=		1<<19,
+		// Phase 5h.5 — projection capture flag. DX8 doesn't need a dirty bit
+		// (it flushed through DX8CALL directly), but the bgfx adapter drains
+		// it from Apply_Render_State_Changes.
+		PROJECTION_CHANGED = 1<<20,
 
 		TEXTURES_CHANGED=
 			TEXTURE0_CHANGED|TEXTURE1_CHANGED|TEXTURE2_CHANGED|TEXTURE3_CHANGED,
@@ -330,6 +351,13 @@ public:
 
 	static void _Set_DX8_Transform(D3DTRANSFORMSTATETYPE transform, const D3DMATRIX& m);
 	static void _Get_DX8_Transform(D3DTRANSFORMSTATETYPE transform, D3DMATRIX& m);
+
+	// Matrix4x4 overloads — pass raw bytes without convention transpose.
+	// The Matrix4x4 will hold D3D row-major bytes, not WWMath column-major.
+	static void _Set_DX8_Transform(D3DTRANSFORMSTATETYPE transform, const Matrix4x4& m);
+	static void _Get_DX8_Transform(D3DTRANSFORMSTATETYPE transform, Matrix4x4& m);
+
+	static void Generate_Mipmaps(IDirect3DBaseTexture8* tex);
 
 	static void Set_DX8_Light(int index,D3DLIGHT8* light);
 	static void Set_DX8_Render_State(D3DRENDERSTATETYPE state, unsigned value);
@@ -774,6 +802,16 @@ WWINLINE void DX8Wrapper::_Get_DX8_Transform(D3DTRANSFORMSTATETYPE transform, D3
 	DX8CALL(GetTransform(transform,&m));
 }
 
+WWINLINE void DX8Wrapper::_Set_DX8_Transform(D3DTRANSFORMSTATETYPE transform, const Matrix4x4& m)
+{
+	_Set_DX8_Transform(transform, reinterpret_cast<const D3DMATRIX&>(m));
+}
+
+WWINLINE void DX8Wrapper::_Get_DX8_Transform(D3DTRANSFORMSTATETYPE transform, Matrix4x4& m)
+{
+	DX8CALL(GetTransform(transform, reinterpret_cast<D3DMATRIX*>(&m)));
+}
+
 // ----------------------------------------------------------------------------
 //
 // Set the index offset for the current index buffer
@@ -1215,17 +1253,22 @@ WWINLINE void DX8Wrapper::Set_Transform(D3DTRANSFORMSTATETYPE transform,const Ma
 {
 	switch ((int)transform) {
 	case D3DTS_WORLD:
-		render_state.world=To_D3DMATRIX(m);
+		render_state.world=m;
 		render_state_changed|=(unsigned)WORLD_CHANGED;
 		render_state_changed&=~(unsigned)WORLD_IDENTITY;
 		break;
 	case D3DTS_VIEW:
-		render_state.view=To_D3DMATRIX(m);
+		render_state.view=m;
 		render_state_changed|=(unsigned)VIEW_CHANGED;
 		render_state_changed&=~(unsigned)VIEW_IDENTITY;
 		break;
 	case D3DTS_PROJECTION:
 		{
+			// Phase 5h.5 — capture for bgfx drain in Apply_Render_State_Changes.
+			// DX8 still pushes through DX8CALL below; the two paths coexist.
+			render_state.projection = m;
+			render_state_changed |= (unsigned)PROJECTION_CHANGED;
+
 			D3DMATRIX ProjectionMatrix=To_D3DMATRIX(m);
 			ZFar=0.0f;
 			ZNear=0.0f;
@@ -1244,12 +1287,12 @@ WWINLINE void DX8Wrapper::Set_Transform(D3DTRANSFORMSTATETYPE transform,const Ma
 {
 	switch ((int)transform) {
 	case D3DTS_WORLD:
-		render_state.world=To_D3DMATRIX(m);
+		render_state.world=Matrix4x4(m);
 		render_state_changed|=(unsigned)WORLD_CHANGED;
 		render_state_changed&=~(unsigned)WORLD_IDENTITY;
 		break;
 	case D3DTS_VIEW:
-		render_state.view=To_D3DMATRIX(m);
+		render_state.view=Matrix4x4(m);
 		render_state_changed|=(unsigned)VIEW_CHANGED;
 		render_state_changed&=~(unsigned)VIEW_IDENTITY;
 		break;
@@ -1276,11 +1319,11 @@ WWINLINE void DX8Wrapper::Get_Transform(D3DTRANSFORMSTATETYPE transform, Matrix4
 	switch ((int)transform) {
 	case D3DTS_WORLD:
 		if (render_state_changed&WORLD_IDENTITY) m.Make_Identity();
-		else m=To_Matrix4x4(render_state.world);
+		else m=render_state.world;
 		break;
 	case D3DTS_VIEW:
 		if (render_state_changed&VIEW_IDENTITY) m.Make_Identity();
-		else m=To_Matrix4x4(render_state.view);
+		else m=render_state.view;
 		break;
 	default:
 		D3DMATRIX dxm;

@@ -32,6 +32,8 @@
 #include <new>
 #include <WWCommon.h>
 
+#ifdef _WIN32
+
 // our own fast critical section
 static ProfileFastCS cs;
 
@@ -340,3 +342,5 @@ ProfileHighLevel::ProfileHighLevel()
 }
 
 ProfileHighLevel ProfileHighLevel::Instance;
+
+#endif // _WIN32

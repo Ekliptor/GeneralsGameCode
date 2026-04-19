@@ -28,6 +28,9 @@
 //////////////////////////////////////////////////////////////////////////////
 
 #include "debug.h"
+
+#ifdef _WIN32
+
 #include <windows.h>
 
 void DebugInternalAssert(const char *file, int line, const char *expr)
@@ -86,3 +89,5 @@ void DebugFreeMemory(void *ptr)
   if (ptr)
     GlobalFree((HGLOBAL)ptr);
 }
+
+#endif // _WIN32

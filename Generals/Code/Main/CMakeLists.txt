@@ -1,4 +1,8 @@
-add_executable(g_generals WIN32)
+if(WIN32)
+    add_executable(g_generals WIN32)
+else()
+    add_executable(g_generals)
+endif()
 
 # Use a binary name that doesn't conflict with original game.
 if("${CMAKE_SYSTEM}" MATCHES "Windows")
@@ -8,20 +12,30 @@ else()
 endif()
 
 target_link_libraries(g_generals PRIVATE
-    binkstub
-    comctl32
-    d3d8
-    d3dx8
-    dinput8
-    dxguid
     g_gameengine
     g_gameenginedevice
     gi_always
-    imm32
-    milesstub
-    vfw32
-    winmm
 )
+
+# Platform-conditional link libraries (Phase 5d).
+if(RTS_RENDERER_LOWER STREQUAL "dx8")
+    target_link_libraries(g_generals PRIVATE d3d8 d3dx8)
+endif()
+if(RTS_PLATFORM_LOWER STREQUAL "win32")
+    target_link_libraries(g_generals PRIVATE dinput8 dxguid)
+endif()
+if(RTS_AUDIO_LOWER STREQUAL "miles")
+    target_link_libraries(g_generals PRIVATE milesstub)
+endif()
+if(RTS_VIDEO_LOWER STREQUAL "bink")
+    target_link_libraries(g_generals PRIVATE binkstub)
+endif()
+if(WIN32)
+    target_link_libraries(g_generals PRIVATE comctl32 imm32 vfw32 winmm)
+endif()
+if(RTS_RENDERER_LOWER STREQUAL "bgfx")
+    target_link_libraries(g_generals PRIVATE corei_bgfx)
+endif()
 
 # TODO Originally referred to build host and user, replace with git info perhaps?
 file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/GeneratedVersion.h

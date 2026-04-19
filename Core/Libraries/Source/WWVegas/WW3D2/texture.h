@@ -49,6 +49,8 @@
 #include "vector3.h"
 #include "texturefilter.h"
 
+#include <cstdint>
+
 struct IDirect3DBaseTexture8;
 struct IDirect3DTexture8;
 struct IDirect3DCubeTexture8;
@@ -200,6 +202,11 @@ public:
 	IDirect3DVolumeTexture8* Peek_D3D_VolumeTexture() const { return (IDirect3DVolumeTexture8*)Peek_D3D_Base_Texture(); }
 	IDirect3DCubeTexture8* Peek_D3D_CubeTexture() const { return (IDirect3DCubeTexture8*)Peek_D3D_Base_Texture(); }
 
+	// Phase 5h.4 — bgfx handle bridge. Zero when no bgfx backend is active
+	// (DX8-only builds or before Init has routed through BgfxTextureCache).
+	// Opaque uintptr_t so texture.h stays independent of BGFXDevice headers.
+	uintptr_t Peek_Bgfx_Handle() const { return BgfxTexture; }
+
 protected:
 
 	void Load_Locked_Surface();
@@ -231,6 +238,12 @@ private:
 
 	// Direct3D texture object
 	IDirect3DBaseTexture8 *D3DTexture;
+
+	// Phase 5h.4 — opaque bgfx texture handle returned by IRenderBackend.
+	// Always present; only populated in bgfx builds (via BgfxTextureCache).
+	// Declared here rather than only in bgfx builds so the class layout is
+	// stable between DX8 and bgfx configurations.
+	uintptr_t BgfxTexture = 0;
 
 	// Name
 	StringClass Name;

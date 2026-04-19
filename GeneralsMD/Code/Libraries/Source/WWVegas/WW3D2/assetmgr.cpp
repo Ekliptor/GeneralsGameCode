@@ -78,6 +78,7 @@
  * - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
 #include "assetmgr.h"
+#ifdef RTS_RENDERER_DX8
 #include <assert.h>
 
 #include "bittype.h"
@@ -112,7 +113,6 @@
 #include "w3dexclusionlist.h"
 #include <INI.h>
 #include <windows.h>
-#include <d3dx8core.h>
 #include "wwprofile.h"
 #include "assetstatus.h"
 #include "ringobj.h"
@@ -1729,4 +1729,5 @@ const char * HTreeIterator::Current_Item_Name()
 	return WW3DAssetManager::Get_Instance()->HTreeManager.Get_Tree(Index)->Get_Name();
 }
 
+#endif // RTS_RENDERER_DX8
 

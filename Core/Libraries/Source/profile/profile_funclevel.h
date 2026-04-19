@@ -29,6 +29,10 @@
 
 #pragma once
 
+#ifndef _WIN32
+#include "osdep.h"
+#endif
+
 /**
   \brief The function level profiler.
 
@@ -182,7 +186,7 @@ public:
     */
     unsigned GetId() const
     {
-      return unsigned(m_threadID);
+      return static_cast<unsigned>(reinterpret_cast<uintptr_t>(m_threadID));
     }
 
   private:

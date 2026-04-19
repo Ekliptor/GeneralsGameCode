@@ -34,6 +34,9 @@
 
 
 #include "part_ldr.h"
+
+#ifdef RTS_RENDERER_DX8
+
 #include "part_emt.h"
 #include "w3derr.h"
 #include "chunkio.h"
@@ -1874,3 +1877,5 @@ ParticleEmitterLoaderClass::Load_W3D (ChunkLoadClass &chunk_load)
     // Return a pointer to the prototype
 	 return pprototype;
 }
+
+#endif // RTS_RENDERER_DX8

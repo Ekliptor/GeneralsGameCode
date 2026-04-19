@@ -41,6 +41,9 @@
 //#define ENABLE_STRIPING
 
 #include "dx8renderer.h"
+
+#ifdef RTS_RENDERER_DX8
+
 #include "dx8wrapper.h"
 #include "dx8polygonrenderer.h"
 #include "dx8vertexbuffer.h"
@@ -2278,9 +2281,7 @@ void DX8MeshRendererClass::Invalidate( bool shutdown)
 	texture_category_container_lists_rigid.Delete_All();
 }
 
-
-
-
+#endif // RTS_RENDERER_DX8
 
 
 

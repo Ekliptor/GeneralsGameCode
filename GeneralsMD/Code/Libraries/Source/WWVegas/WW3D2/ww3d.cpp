@@ -82,6 +82,7 @@
 
 
 #include "ww3d.h"
+#ifdef RTS_RENDERER_DX8
 #include "rinfo.h"
 #include "assetmgr.h"
 #include "boxrobj.h"
@@ -2105,3 +2106,4 @@ void WW3D::Set_Gamma(float gamma,float bright,float contrast,bool calibrate)
 {
 	DX8Wrapper::Set_Gamma(gamma,bright,contrast,calibrate);
 }
+#endif // RTS_RENDERER_DX8

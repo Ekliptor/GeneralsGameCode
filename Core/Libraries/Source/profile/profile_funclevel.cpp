@@ -32,6 +32,8 @@
 #include "../debug/debug.h"
 #include <new>
 
+#ifdef _WIN32
+
 #ifdef HAS_PROFILE
 
 // TLS index (-1 if not yet initialized)
@@ -793,3 +795,5 @@ ProfileFuncLevel::ProfileFuncLevel()
 
 ProfileFuncLevel ProfileFuncLevel::Instance;
 HANDLE ProfileFastCS::testEvent=::CreateEvent(nullptr,FALSE,FALSE,"");
+
+#endif // _WIN32

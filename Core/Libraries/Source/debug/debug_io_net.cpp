@@ -30,8 +30,11 @@
 #include "debug.h"
 #include "internal.h"
 #include "internal_io.h"
-#include <windows.h>
 #include <new>      // needed for placement new prototype
+
+#ifdef _WIN32
+
+#include <windows.h>
 
 DebugIONet::DebugIONet()
 {
@@ -130,3 +133,5 @@ void DebugIONet::Delete()
   this->~DebugIONet();
   DebugFreeMemory(this);
 }
+
+#endif // _WIN32

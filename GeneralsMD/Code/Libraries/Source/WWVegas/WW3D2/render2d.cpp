@@ -39,6 +39,9 @@
  * - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
 #include "always.h"
+
+#ifdef RTS_RENDERER_DX8
+
 #include "render2d.h"
 #include "mutex.h"
 #include "ww3d.h"
@@ -856,4 +859,6 @@ Vector2	Render2DTextClass::Get_Text_Extents( const WCHAR * text )
 
 	return extent;
 }
+
+#endif // RTS_RENDERER_DX8
 

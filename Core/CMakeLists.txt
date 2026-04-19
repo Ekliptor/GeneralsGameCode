@@ -45,4 +45,7 @@ add_subdirectory(GameEngine)
 # Platform specific GameEngine code
 add_subdirectory(GameEngineDevice)
 
-add_subdirectory(Tools)
+# Tools depend on DX8/MFC; skip when RTS_RENDERER=bgfx.
+if(NOT RTS_RENDERER_LOWER STREQUAL "bgfx")
+    add_subdirectory(Tools)
+endif()

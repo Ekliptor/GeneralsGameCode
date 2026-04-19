@@ -29,6 +29,10 @@
 
 #pragma once
 
+#ifndef _WIN32
+#include "osdep.h"
+#endif
+
 /**
   \class Debug debug.h <rts/debug.h>
 

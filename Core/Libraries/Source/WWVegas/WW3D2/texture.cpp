@@ -40,6 +40,7 @@
  * - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
 #include "texture.h"
+#ifdef RTS_RENDERER_DX8
 
 #include <d3d8.h>
 #include <d3dx8core.h>
@@ -1898,3 +1899,4 @@ void VolumeTextureClass::Apply_New_Surface
 		Depth=d3d_desc.Depth;
 	}
 }
+#endif // RTS_RENDERER_DX8

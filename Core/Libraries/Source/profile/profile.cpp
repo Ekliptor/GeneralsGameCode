@@ -30,6 +30,9 @@
 #include "profile.h"
 #include "internal.h"
 #include <new>
+
+#ifdef _WIN32
+
 #include "mmsystem.h"
 
 // yuk, I'm doing this so weird because the destructor
@@ -383,3 +386,5 @@ static void ProfileShutdown()
 }
 
 int profileTracerInit=atexit(ProfileShutdown);
+
+#endif // _WIN32

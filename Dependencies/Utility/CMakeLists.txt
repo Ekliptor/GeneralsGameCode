@@ -21,6 +21,11 @@ set(UTILITY_SRC
 
 add_library(core_utility INTERFACE)
 target_include_directories(core_utility INTERFACE ${CMAKE_CURRENT_SOURCE_DIR})
+# Phase 5d: On non-Windows, provide osdep.h from the Utility directory (stlport
+# provides it on VC6 builds, but the dummy stlport target has no include dirs).
+if(NOT WIN32)
+    target_include_directories(core_utility INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/Utility)
+endif()
 target_precompile_headers(core_utility INTERFACE
     [["Utility/CppMacros.h"]] # Must be first, to be removed when abandoning VC6
 )
@@ -30,4 +35,9 @@ target_sources(core_utility PRIVATE ${UTILITY_SRC})
 
 add_library(core_utility_no_pch INTERFACE)
 target_include_directories(core_utility_no_pch INTERFACE ${CMAKE_CURRENT_SOURCE_DIR})
+# Match core_utility: non-Windows needs Utility/ on the include path so
+# `#include "osdep.h"` from matrix3d.h (and friends) resolves.
+if(NOT WIN32)
+    target_include_directories(core_utility_no_pch INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/Utility)
+endif()
 target_sources(core_utility_no_pch PRIVATE ${UTILITY_SRC})

@@ -41,6 +41,11 @@
 #include "dx8caps.h"
 #include "dx8wrapper.h"
 #include "formconv.h"
+
+#ifdef RTS_RENDERER_DX8
+// ============================================================================
+// DX8 backend — full DX8Caps implementation follows.
+// ============================================================================
 #pragma warning (disable : 4201)		// nonstandard extension - nameless struct
 #include <windows.h>
 #include <mmsystem.h>
@@ -1168,4 +1173,25 @@ void DX8Caps::Vendor_Specific_Hacks(const D3DADAPTER_IDENTIFIER8& adapter_id)
 		SupportDot3 = false;
 	}
 }
+
+#else // !RTS_RENDERER_DX8
+// ============================================================================
+// Non-DX8 (bgfx) build — DX8Caps stubs returning safe defaults.
+// ============================================================================
+
+DX8Caps::DX8Caps(IDirect3D8*, const D3DCAPS8&, WW3DFormat, const D3DADAPTER_IDENTIFIER8&)
+{
+	memset(&Caps, 0, sizeof(Caps));
+}
+
+DX8Caps::DX8Caps(IDirect3D8*, IDirect3DDevice8*, WW3DFormat, const D3DADAPTER_IDENTIFIER8&)
+{
+	memset(&Caps, 0, sizeof(Caps));
+}
+
+void DX8Caps::Shutdown() {}
+void DX8Caps::Compute_Caps(WW3DFormat, const D3DADAPTER_IDENTIFIER8&) {}
+bool DX8Caps::Is_Valid_Display_Format(int, int, WW3DFormat) { return false; }
+
+#endif // RTS_RENDERER_DX8
 

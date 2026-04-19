@@ -24,14 +24,18 @@ target_include_directories(core_profile INTERFACE
     ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
-target_precompile_headers(core_profile PRIVATE
+set(PROFILE_PCH_HEADERS
     [["Utility/CppMacros.h"]] # Must be first, to be removed when abandoning VC6
     "profile.h"
     "internal.h"
-    <windows.h>
 )
+if(WIN32)
+    list(APPEND PROFILE_PCH_HEADERS <windows.h>)
+endif()
+target_precompile_headers(core_profile PRIVATE ${PROFILE_PCH_HEADERS})
 
 target_link_libraries(core_profile PRIVATE
+    core_utility
     core_wwcommon
     corei_always
 )

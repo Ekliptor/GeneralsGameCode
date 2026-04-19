@@ -14,14 +14,18 @@ if(RTS_BUILD_OPTION_FFMPEG)
 endif()
 
 # Cross-platform renderer backend selector (see docs/Phase0-RHI-Seam.md, docs/CrossPlatformPort-Plan.md).
-# Phase 0 only accepts "dx8" — "bgfx" will be added in Phase 5.
-set(RTS_RENDERER "dx8" CACHE STRING "Renderer backend. Values: dx8 (legacy Windows-only) | bgfx (planned, Phase 5)")
+# dx8 = legacy DirectX 8 fixed-function (Windows 32-bit only).
+# bgfx = cross-platform (Metal on macOS, D3D11 on Windows; Phase 5).
+set(RTS_RENDERER "dx8" CACHE STRING "Renderer backend. Values: dx8 | bgfx")
 set_property(CACHE RTS_RENDERER PROPERTY STRINGS "dx8" "bgfx")
 string(TOLOWER "${RTS_RENDERER}" RTS_RENDERER_LOWER)
-if(NOT RTS_RENDERER_LOWER STREQUAL "dx8")
-    message(FATAL_ERROR "RTS_RENDERER=${RTS_RENDERER} is not supported yet. Only 'dx8' is available until Phase 5 lands the bgfx backend.")
+if(RTS_RENDERER_LOWER STREQUAL "dx8")
+    target_compile_definitions(core_config INTERFACE RTS_RENDERER_DX8=1)
+elseif(RTS_RENDERER_LOWER STREQUAL "bgfx")
+    target_compile_definitions(core_config INTERFACE RTS_RENDERER_BGFX=1)
+else()
+    message(FATAL_ERROR "RTS_RENDERER=${RTS_RENDERER} is not supported. Use dx8|bgfx.")
 endif()
-target_compile_definitions(core_config INTERFACE RTS_RENDERER_DX8=1)
 add_feature_info(RendererBackend TRUE "Renderer backend: ${RTS_RENDERER_LOWER}")
 
 # Audio backend selector (Phase 1 — see docs/CrossPlatformPort-Plan.md).

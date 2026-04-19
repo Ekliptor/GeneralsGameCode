@@ -29,7 +29,12 @@
 
 // this function has its own file so that it can be 'overridden'
 // by another program using the Debug module
+
+#ifdef _WIN32
+
 const char *DebugGetDefaultCommands()
 {
   return "!debug.io flat add";
 }
+
+#endif // _WIN32

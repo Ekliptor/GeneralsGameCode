@@ -42,9 +42,11 @@
 #pragma warning (push, 3)	// (gth) system headers complain at warning level 4...
 #endif
 
+#ifdef _WIN32
 #include "windows.h"
 #include "windowsx.h"
 #include "vfw.h"
+#endif
 
 #if defined (_MSC_VER)
 #pragma warning (pop)
@@ -84,11 +86,15 @@ protected:
 	void GrabRawFrame(void *BitmapPointer);
 
 	// avi settings
+#ifdef _WIN32
 	PAVIFILE				AVIFile;
+#endif
 	long					*Bitmap;
+#ifdef _WIN32
 	PAVISTREAM			Stream;
 	AVISTREAMINFO		AVIStreamInfo;
 	BITMAPINFOHEADER	BitmapInfoHeader;
+#endif
 
 	// general purpose cleanup routine
 	void CleanupAVI();

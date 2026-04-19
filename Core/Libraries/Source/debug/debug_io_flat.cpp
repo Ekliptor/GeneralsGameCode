@@ -32,9 +32,12 @@
 #include "internal.h"
 #include "internal_io.h"
 #include <stdlib.h>
+#include <new>      // needed for placement new prototype
+
+#ifdef _WIN32
+
 #include <windows.h>
 #include <WWCommon.h>
-#include <new>      // needed for placement new prototype
 
 DebugIOFlat::OutputStream::OutputStream(const char *filename, unsigned maxSize):
   m_bufferUsed(0), m_nextChar(0)
@@ -547,3 +550,5 @@ void DebugIOFlat::Delete()
   this->~DebugIOFlat();
   DebugFreeMemory(this);
 }
+
+#endif // _WIN32

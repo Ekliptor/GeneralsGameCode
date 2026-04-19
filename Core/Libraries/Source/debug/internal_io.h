@@ -29,7 +29,11 @@
 
 #pragma once
 
+#ifdef _WIN32
 #include <windows.h>
+#else
+#include "osdep.h"
+#endif
 
 /// \internal \brief con debug I/O class
 class DebugIOCon: public DebugIOInterface

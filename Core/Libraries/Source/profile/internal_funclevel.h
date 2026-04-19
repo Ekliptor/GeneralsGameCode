@@ -29,7 +29,12 @@
 
 #pragma once
 
+#ifdef _WIN32
 #include <windows.h>
+#else
+#include <cstdint>
+typedef unsigned long long LARGE_INTEGER_QP;
+#endif
 
 class ProfileFuncLevelTracer
 {

@@ -60,6 +60,9 @@ public:
 
 
 #include "w3d_dep.h"
+
+#ifdef RTS_RENDERER_DX8
+
 #include "w3d_file.h"
 #include <assert.h>
 #include <chunkio.h>
@@ -573,3 +576,5 @@ static const char * Make_W3D_Filename (const char *w3d_name)
 	strlcat(buffer, ".w3d", ARRAY_SIZE(buffer));
 	return buffer;
 }
+
+#endif // RTS_RENDERER_DX8

@@ -19,6 +19,7 @@
 // 08/06/02 KM Added cube map and volume texture support
 
 #include "ddsfile.h"
+#ifdef RTS_RENDERER_DX8
 #include "ffactory.h"
 #include "bufffile.h"
 #include "formconv.h"
@@ -1256,3 +1257,4 @@ bool DDSFileClass::Get_4x4_Block(
 	return false;
 
 }
+#endif // RTS_RENDERER_DX8

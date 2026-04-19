@@ -29,6 +29,10 @@
 
 #pragma once
 
+#ifndef _WIN32
+#include "osdep.h"
+#endif
+
 /// \internal internal Id representation
 class ProfileId;
 

@@ -20,10 +20,11 @@
 #pragma once
 #include <pthread.h>
 #include <unistd.h>
+#include <cstdint>
 
 inline int GetCurrentThreadId()
 {
-  return pthread_self();
+  return static_cast<int>(reinterpret_cast<uintptr_t>(pthread_self()));
 }
 
 inline void Sleep(int ms)

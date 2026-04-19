@@ -240,7 +240,7 @@ target_compile_definitions(z_ww3d2 PRIVATE
     $<$<BOOL:${IS_VS6_BUILD}>:WINVER=0x0500>
 )
 
-target_precompile_headers(z_ww3d2 PRIVATE
+set(Z_WW3D2_PCH_HEADERS
     [["Utility/CppMacros.h"]] # Must be first, to be removed when abandoning VC6
     [["dx8wrapper.h"]]
     [["always.h"]]
@@ -248,8 +248,11 @@ target_precompile_headers(z_ww3d2 PRIVATE
     [["win.h"]]
     [["WWCommon.h"]]
     [["wwstring.h"]]
-    <windows.h>
 )
+if(WIN32)
+    list(APPEND Z_WW3D2_PCH_HEADERS <windows.h>)
+endif()
+target_precompile_headers(z_ww3d2 PRIVATE ${Z_WW3D2_PCH_HEADERS})
 
 target_link_libraries(z_ww3d2 PRIVATE
     core_wwdebug

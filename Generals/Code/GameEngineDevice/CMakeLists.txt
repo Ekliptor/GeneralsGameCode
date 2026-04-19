@@ -186,14 +186,17 @@ target_include_directories(g_gameenginedevice PUBLIC
     Include
 )
 
-target_precompile_headers(g_gameenginedevice PRIVATE
+set(G_GAMEENGINEDEVICE_PCH_HEADERS
     [["Utility/CppMacros.h"]] # Must be first, to be removed when abandoning VC6
     [["Common/STLTypedefs.h"]]
     [["Common/SubsystemInterface.h"]]
     [["INI.h"]]
     [["WWCommon.h"]]
-    <windows.h>
 )
+if(WIN32)
+    list(APPEND G_GAMEENGINEDEVICE_PCH_HEADERS <windows.h>)
+endif()
+target_precompile_headers(g_gameenginedevice PRIVATE ${G_GAMEENGINEDEVICE_PCH_HEADERS})
 
 target_link_libraries(g_gameenginedevice PRIVATE
     corei_gameenginedevice_private

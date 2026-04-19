@@ -67,6 +67,9 @@ include(cmake/openal.cmake)
 include(cmake/ffmpeg.cmake)
 include(cmake/sdl3.cmake)
 include(cmake/curl.cmake)
+if(RTS_RENDERER_LOWER STREQUAL "bgfx")
+    include(cmake/bgfx.cmake)
+endif()
 
 # Define a dummy stlport target when not on VC6.
 if (IS_VS6_BUILD)
@@ -95,13 +98,18 @@ add_subdirectory(resources)
 
 add_subdirectory(Core)
 
-# Add main build targets
+# Add main build targets.
 if(RTS_BUILD_ZEROHOUR)
     add_subdirectory(GeneralsMD)
 endif()
 
 if(RTS_BUILD_GENERALS)
     add_subdirectory(Generals)
+endif()
+
+# Standalone tests (gated per-test by backend selector and RTS_BUILD_CORE_EXTRAS).
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/CMakeLists.txt")
+    add_subdirectory(tests)
 endif()
 
 feature_summary(WHAT ENABLED_FEATURES DESCRIPTION "Enabled features:")

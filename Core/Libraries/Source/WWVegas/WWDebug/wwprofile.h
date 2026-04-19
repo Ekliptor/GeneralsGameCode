@@ -40,8 +40,7 @@
 #include "wwstring.h"
 
 #ifdef _UNIX
-typedef signed long long __int64;
-typedef signed long long _int64;
+#include "osdep.h"
 #endif
 
 // enable profiling by default in debug mode.

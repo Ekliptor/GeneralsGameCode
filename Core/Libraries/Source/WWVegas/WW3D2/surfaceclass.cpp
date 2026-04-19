@@ -48,6 +48,7 @@
  * - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
 #include "surfaceclass.h"
+#ifdef RTS_RENDERER_DX8
 #include "formconv.h"
 #include "dx8wrapper.h"
 #include "vector2i.h"
@@ -934,3 +935,4 @@ void SurfaceClass::Hue_Shift(const Vector3 &hsv_shift)
 
 	Unlock();
 }
+#endif // RTS_RENDERER_DX8

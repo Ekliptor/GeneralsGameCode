@@ -73,6 +73,9 @@
 
 
 #include "rendobj.h"
+
+#ifdef RTS_RENDERER_DX8
+
 #include "assetmgr.h"
 #include "win.h"
 #include "pot.h"
@@ -1314,4 +1317,5 @@ bool RenderObjClass::Load (ChunkLoadClass &cload)
 	return true;
 }
 
+#endif // RTS_RENDERER_DX8
 

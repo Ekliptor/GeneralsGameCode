@@ -38,6 +38,8 @@
  * - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
 #include "part_emt.h"
+
+#ifdef RTS_RENDERER_DX8
 #include "wwdebug.h"
 #include "ww3d.h"
 #include "assetmgr.h"
@@ -882,3 +884,5 @@ ParticleEmitterClass::Add_Dependencies_To_List
 	RenderObjClass::Add_Dependencies_To_List (file_list, textures_only);
 	return ;
 }
+
+#endif // RTS_RENDERER_DX8

@@ -216,8 +216,10 @@ target_link_libraries(corei_gameenginedevice_private INTERFACE
 
 target_link_libraries(corei_gameenginedevice_public INTERFACE
     corei_gameengine_public
-    d3d8lib
 )
+if(RTS_RENDERER_LOWER STREQUAL "dx8")
+    target_link_libraries(corei_gameenginedevice_public INTERFACE d3d8lib)
+endif()
 
 # --- Audio backend sources & libs ------------------------------------------
 if(RTS_AUDIO_LOWER STREQUAL "miles")
@@ -280,4 +282,10 @@ elseif(RTS_PLATFORM_LOWER STREQUAL "sdl")
         Source/SDLDevice/GameClient/SDLKeyboard.cpp
     )
     target_link_libraries(corei_gameenginedevice_public INTERFACE SDL3::SDL3)
+endif()
+
+# --- Renderer backend: bgfx (Phase 5) ----------------------------------------
+# Standalone static library so the smoke test can link it without the full game.
+if(RTS_RENDERER_LOWER STREQUAL "bgfx")
+    add_subdirectory(Source/BGFXDevice)
 endif()

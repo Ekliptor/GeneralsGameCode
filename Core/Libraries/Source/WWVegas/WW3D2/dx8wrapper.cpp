@@ -86,6 +86,46 @@
 
 #include "shdlib.h"
 
+// Phase 5b: conversion helpers between RenderLight and D3DLIGHT8.
+// These live in the .cpp so d3d8.h never leaks through RenderLight.h.
+static D3DLIGHT8 To_D3DLIGHT8(const RenderLight& rl)
+{
+	D3DLIGHT8 d;
+	d.Type        = static_cast<D3DLIGHTTYPE>(rl.Type);
+	d.Diffuse     = { rl.Diffuse.X,  rl.Diffuse.Y,  rl.Diffuse.Z,  1.0f };
+	d.Specular    = { rl.Specular.X, rl.Specular.Y, rl.Specular.Z, 1.0f };
+	d.Ambient     = { rl.Ambient.X,  rl.Ambient.Y,  rl.Ambient.Z,  1.0f };
+	d.Position    = { rl.Position.X,  rl.Position.Y,  rl.Position.Z };
+	d.Direction   = { rl.Direction.X, rl.Direction.Y, rl.Direction.Z };
+	d.Range        = rl.Range;
+	d.Falloff      = rl.Falloff;
+	d.Attenuation0 = rl.Attenuation0;
+	d.Attenuation1 = rl.Attenuation1;
+	d.Attenuation2 = rl.Attenuation2;
+	d.Theta        = rl.Theta;
+	d.Phi          = rl.Phi;
+	return d;
+}
+
+static RenderLight To_RenderLight(const D3DLIGHT8& d)
+{
+	RenderLight rl;
+	rl.Type        = static_cast<RenderLightType>(d.Type);
+	rl.Diffuse     = Vector3(d.Diffuse.r,  d.Diffuse.g,  d.Diffuse.b);
+	rl.Specular    = Vector3(d.Specular.r, d.Specular.g, d.Specular.b);
+	rl.Ambient     = Vector3(d.Ambient.r,  d.Ambient.g,  d.Ambient.b);
+	rl.Position    = Vector3(d.Position.x,  d.Position.y,  d.Position.z);
+	rl.Direction   = Vector3(d.Direction.x, d.Direction.y, d.Direction.z);
+	rl.Range        = d.Range;
+	rl.Falloff      = d.Falloff;
+	rl.Attenuation0 = d.Attenuation0;
+	rl.Attenuation1 = d.Attenuation1;
+	rl.Attenuation2 = d.Attenuation2;
+	rl.Theta        = d.Theta;
+	rl.Phi          = d.Phi;
+	return rl;
+}
+
 const int DEFAULT_RESOLUTION_WIDTH = 640;
 const int DEFAULT_RESOLUTION_HEIGHT = 480;
 const int DEFAULT_BIT_DEPTH = 32;
@@ -191,6 +231,11 @@ DX8_Stats	 DX8Wrapper::stats;
 ** DX8Wrapper Implementation
 **
 ***********************************************************************************/
+
+#ifdef RTS_RENDERER_DX8
+// ============================================================================
+// DX8 backend — full implementation follows.
+// ============================================================================
 
 void Log_DX8_ErrorCode(unsigned res)
 {
@@ -2240,22 +2285,23 @@ void DX8Wrapper::Apply_Render_State_Changes()
 				if (render_state.LightEnable[index]) {
 #ifdef MESH_RENDER_SNAPSHOT_ENABLED
 					if ( WW3D::Is_Snapshot_Activated() ) {
-						D3DLIGHT8 * light = &(render_state.Lights[index]);
+						const RenderLight& rl = render_state.Lights[index];
 						static const char * _light_types[] = { "Unknown", "Point","Spot", "Directional" };
-						WWASSERT((light->Type >= 0) && (light->Type <= 3));
+						WWASSERT((static_cast<int>(rl.Type) >= 0) && (static_cast<int>(rl.Type) <= 3));
 
 						SNAPSHOT_SAY((" type = %s amb = %4.2f,%4.2f,%4.2f  diff = %4.2f,%4.2f,%4.2f spec = %4.2f, %4.2f, %4.2f",
-							_light_types[light->Type],
-							light->Ambient.r,light->Ambient.g,light->Ambient.b,
-							light->Diffuse.r,light->Diffuse.g,light->Diffuse.b,
-							light->Specular.r,light->Specular.g,light->Specular.b ));
+							_light_types[static_cast<int>(rl.Type)],
+							rl.Ambient.X,rl.Ambient.Y,rl.Ambient.Z,
+							rl.Diffuse.X,rl.Diffuse.Y,rl.Diffuse.Z,
+							rl.Specular.X,rl.Specular.Y,rl.Specular.Z ));
 						SNAPSHOT_SAY((" pos = %f, %f, %f  dir = %f, %f, %f",
-							light->Position.x, light->Position.y, light->Position.z,
-							light->Direction.x, light->Direction.y, light->Direction.z ));
+							rl.Position.X, rl.Position.Y, rl.Position.Z,
+							rl.Direction.X, rl.Direction.Y, rl.Direction.Z ));
 					}
 #endif
 
-					Set_DX8_Light(index,&render_state.Lights[index]);
+					D3DLIGHT8 d3dLight = To_D3DLIGHT8(render_state.Lights[index]);
+					Set_DX8_Light(index,&d3dLight);
 				}
 				else {
 					Set_DX8_Light(index,nullptr);
@@ -2267,11 +2313,11 @@ void DX8Wrapper::Apply_Render_State_Changes()
 
 	if (render_state_changed&WORLD_CHANGED) {
 		SNAPSHOT_SAY(("DX8 - apply world matrix"));
-		_Set_DX8_Transform(D3DTS_WORLD,render_state.world);
+		_Set_DX8_Transform(D3DTS_WORLD,To_D3DMATRIX(render_state.world));
 	}
 	if (render_state_changed&VIEW_CHANGED) {
 		SNAPSHOT_SAY(("DX8 - apply view matrix"));
-		_Set_DX8_Transform(D3DTS_VIEW,render_state.view);
+		_Set_DX8_Transform(D3DTS_VIEW,To_D3DMATRIX(render_state.view));
 	}
 	if (render_state_changed&VERTEX_BUFFER_CHANGED) {
 		SNAPSHOT_SAY(("DX8 - apply vb change"));
@@ -2535,6 +2581,13 @@ IDirect3DTexture8 * DX8Wrapper::_Create_DX8_Texture
 
 	return texture;
 
+}
+
+void DX8Wrapper::Generate_Mipmaps(IDirect3DBaseTexture8* tex)
+{
+	if (tex) {
+		DX8_ErrorCode(D3DXFilterTexture(tex, nullptr, 0, D3DX_FILTER_BOX));
+	}
 }
 
 /*!
@@ -2937,7 +2990,7 @@ void DX8Wrapper::Compute_Caps(WW3DFormat display_format)
 void DX8Wrapper::Set_Light(unsigned index, const D3DLIGHT8* light)
 {
 	if (light) {
-		render_state.Lights[index]=*light;
+		render_state.Lights[index]=To_RenderLight(*light);
 		render_state.LightEnable[index]=true;
 	}
 	else {
@@ -2948,74 +3001,60 @@ void DX8Wrapper::Set_Light(unsigned index, const D3DLIGHT8* light)
 
 void DX8Wrapper::Set_Light(unsigned index,const LightClass &light)
 {
-	D3DLIGHT8 dlight;
+	RenderLight rl;
 	Vector3 temp;
-	memset(&dlight,0,sizeof(D3DLIGHT8));
+	memset(&rl,0,sizeof(RenderLight));
 
 	switch (light.Get_Type())
 	{
 	case LightClass::POINT:
-		{
-			dlight.Type=D3DLIGHT_POINT;
-		}
+		rl.Type=RenderLightType::POINT;
 		break;
 	case LightClass::DIRECTIONAL:
-		{
-			dlight.Type=D3DLIGHT_DIRECTIONAL;
-		}
+		rl.Type=RenderLightType::DIRECTIONAL;
 		break;
 	case LightClass::SPOT:
-		{
-			dlight.Type=D3DLIGHT_SPOT;
-		}
+		rl.Type=RenderLightType::SPOT;
 		break;
 	}
 
 	light.Get_Diffuse(&temp);
 	temp*=light.Get_Intensity();
-	dlight.Diffuse.r=temp.X;
-	dlight.Diffuse.g=temp.Y;
-	dlight.Diffuse.b=temp.Z;
-	dlight.Diffuse.a=1.0f;
+	rl.Diffuse=temp;
 
 	light.Get_Specular(&temp);
 	temp*=light.Get_Intensity();
-	dlight.Specular.r=temp.X;
-	dlight.Specular.g=temp.Y;
-	dlight.Specular.b=temp.Z;
-	dlight.Specular.a=1.0f;
+	rl.Specular=temp;
 
 	light.Get_Ambient(&temp);
 	temp*=light.Get_Intensity();
-	dlight.Ambient.r=temp.X;
-	dlight.Ambient.g=temp.Y;
-	dlight.Ambient.b=temp.Z;
-	dlight.Ambient.a=1.0f;
+	rl.Ambient=temp;
 
-	temp=light.Get_Position();
-	dlight.Position=*(D3DVECTOR*) &temp;
+	rl.Position=light.Get_Position();
 
 	light.Get_Spot_Direction(temp);
-	dlight.Direction=*(D3DVECTOR*) &temp;
+	rl.Direction=temp;
 
-	dlight.Range=light.Get_Attenuation_Range();
-	dlight.Falloff=light.Get_Spot_Exponent();
-	dlight.Theta=light.Get_Spot_Angle();
-	dlight.Phi=light.Get_Spot_Angle();
+	rl.Range=light.Get_Attenuation_Range();
+	rl.Falloff=light.Get_Spot_Exponent();
+	rl.Theta=light.Get_Spot_Angle();
+	rl.Phi=light.Get_Spot_Angle();
 
 	// Inverse linear light 1/(1+D)
 	double a,b;
 	light.Get_Far_Attenuation_Range(a,b);
-	dlight.Attenuation0=1.0f;
+	rl.Attenuation0=1.0f;
 	if (fabs(a-b)<1e-5)
 		// if the attenuation range is too small assume uniform with cutoff
-		dlight.Attenuation1=0.0f;
+		rl.Attenuation1=0.0f;
 	else
 		// this will cause the light to drop to half intensity at the first far attenuation
-		dlight.Attenuation1=(float) 1.0/a;
-	dlight.Attenuation2=0.0f;
+		rl.Attenuation1=(float) 1.0/a;
+	rl.Attenuation2=0.0f;
 
-	Set_Light(index,&dlight);
+	render_state.Lights[index]=rl;
+	render_state.LightEnable[index]=true;
+	render_state_changed|=(LIGHT0_CHANGED<<index);
 }
 
 //**********************************************************************************************
@@ -3041,28 +3080,28 @@ void DX8Wrapper::Set_Light_Environment(LightEnvironmentClass* light_env)
 #endif
 		}
 
-		D3DLIGHT8 light;
+		RenderLight rl;
 		int l=0;
 		for (;l<light_count;++l) {
 
-			::ZeroMemory(&light, sizeof(D3DLIGHT8));
+			memset(&rl, 0, sizeof(RenderLight));
 
-			light.Type=D3DLIGHT_DIRECTIONAL;
-			(Vector3&)light.Diffuse=light_env->Get_Light_Diffuse(l);
+			rl.Type=RenderLightType::DIRECTIONAL;
+			rl.Diffuse=light_env->Get_Light_Diffuse(l);
 			Vector3 dir=-light_env->Get_Light_Direction(l);
-			light.Direction=(const D3DVECTOR&)(dir);
+			rl.Direction=dir;
 
 			// (gth) TODO: put specular into LightEnvironment?  Much work to be done on lights :-)'
 			if (l==0) {
-				light.Specular.r = light.Specular.g = light.Specular.b = 1.0f;
+				rl.Specular = Vector3(1.0f, 1.0f, 1.0f);
 			}
 
 			if (light_env->isPointLight(l)) {
-				light.Type = D3DLIGHT_POINT;
-				(Vector3&)light.Diffuse=light_env->getPointDiffuse(l);
-				(Vector3&)light.Ambient=light_env->getPointAmbient(l);
-				light.Position = (const D3DVECTOR&)light_env->getPointCenter(l);
-				light.Range = light_env->getPointOrad(l);
+				rl.Type = RenderLightType::POINT;
+				rl.Diffuse=light_env->getPointDiffuse(l);
+				rl.Ambient=light_env->getPointAmbient(l);
+				rl.Position=light_env->getPointCenter(l);
+				rl.Range = light_env->getPointOrad(l);
 
 				// Inverse linear light 1/(1+D)
 				double a,b;
@@ -3072,21 +3111,23 @@ void DX8Wrapper::Set_Light_Environment(LightEnvironmentClass* light_env)
 //(gth) CNC3 Generals code for the attenuation factors is causing the lights to over-brighten
 //I'm changing the Attenuation0 parameter to 1.0 to avoid this problem.
 #if 0
-				light.Attenuation0=0.01f;
+				rl.Attenuation0=0.01f;
 #else
-				light.Attenuation0=1.0f;
+				rl.Attenuation0=1.0f;
 #endif
 				if (fabs(a-b)<1e-5)
 					// if the attenuation range is too small assume uniform with cutoff
-					light.Attenuation1=0.0f;
+					rl.Attenuation1=0.0f;
 				else
 					// this will cause the light to drop to half intensity at the first far attenuation
-					light.Attenuation1=(float) 0.1/a;
+					rl.Attenuation1=(float) 0.1/a;
 
-				light.Attenuation2=8.0f/(b*b);
+				rl.Attenuation2=8.0f/(b*b);
 			}
 
-			Set_Light(l,&light);
+			render_state.Lights[l]=rl;
+			render_state.LightEnable[l]=true;
+			render_state_changed|=(LIGHT0_CHANGED<<l);
 		}
 
 		for (;l<4;++l) {
@@ -3678,7 +3719,7 @@ void DX8Wrapper::Set_World_Identity()
 {
 	if (render_state_changed&(unsigned)WORLD_IDENTITY)
 		return;
-	wrapper::D3DMatrixIdentity(&render_state.world);
+	render_state.world.Make_Identity();
 	render_state_changed|=(unsigned)WORLD_CHANGED|(unsigned)WORLD_IDENTITY;
 }
 
@@ -3686,7 +3727,7 @@ void DX8Wrapper::Set_View_Identity()
 {
 	if (render_state_changed&(unsigned)VIEW_IDENTITY)
 		return;
-	wrapper::D3DMatrixIdentity(&render_state.view);
+	render_state.view.Make_Identity();
 	render_state_changed|=(unsigned)VIEW_CHANGED|(unsigned)VIEW_IDENTITY;
 }
 
@@ -4432,3 +4473,294 @@ WW3DFormat	DX8Wrapper::getBackBufferFormat()
 {
 	return D3DFormat_To_WW3DFormat( _PresentParameters.BackBufferFormat );
 }
+
+#else // !RTS_RENDERER_DX8
+// ============================================================================
+// Non-DX8 (bgfx) build — stub implementations.  The game target compiles and
+// links but the DX8 rendering path is inert.  Phase 5e+ fills in actual bgfx
+// rendering through the IRenderBackend interface.
+// ============================================================================
+
+#include "BGFXDevice/Common/BgfxBootstrap.h"
+#include "WW3D2/RenderBackendRuntime.h"
+#include "WW3D2/IRenderBackend.h"
+#include "vector4.h"
+#include "matrix4.h"
+
+namespace
+{
+	// Phase 5h.2 — stash the hwnd from DX8Wrapper::Init so that the first
+	// Set_Render_Device call (which brings the resolution with it) can hand
+	// it to BgfxBootstrap::Ensure_Init. DX8 does the same two-phase dance
+	// (Init takes hwnd; Set_Render_Device takes the mode) — this mirrors it.
+	void* s_pendingHwnd = nullptr;
+
+	// Phase 5h.4 — cheap identity matrix for fallback when callers ask the
+	// backend for a transform they haven't configured yet.
+	const float kIdentityMat[16] = {
+		1.f, 0.f, 0.f, 0.f,
+		0.f, 1.f, 0.f, 0.f,
+		0.f, 0.f, 1.f, 0.f,
+		0.f, 0.f, 0.f, 1.f,
+	};
+}
+
+void Log_DX8_ErrorCode(unsigned) {}
+void DX8_Assert() {}
+
+bool DX8Wrapper::Init(void* hwnd, bool)
+{
+	s_pendingHwnd = hwnd;
+	IsInitted = true;
+	return true;
+}
+
+void DX8Wrapper::Shutdown()
+{
+	// Phase 5h.2 — drain the bgfx backend before the rest of DX8Wrapper's
+	// state tears down, so any future Draw_* calls routed through
+	// RenderBackendRuntime see a null backend and fail closed.
+	BgfxBootstrap::Shutdown();
+	s_pendingHwnd = nullptr;
+	IsInitted = false;
+}
+void DX8Wrapper::Do_Onetime_Device_Dependent_Inits() {}
+void DX8Wrapper::Do_Onetime_Device_Dependent_Shutdowns() {}
+
+bool DX8Wrapper::Has_Stencil() { return false; }
+void DX8Wrapper::Get_Format_Name(unsigned int, StringClass*) {}
+
+void DX8Wrapper::Begin_Scene()
+{
+	// Phase 5h.4 — route through the active bgfx backend if one is up. The
+	// game's existing render loop calls Begin_Scene at the start of every
+	// frame; we make that be a real bgfx view-touch.
+	if (IRenderBackend* b = RenderBackendRuntime::Get_Active())
+		b->Begin_Scene();
+}
+void DX8Wrapper::End_Scene(bool flip_frame)
+{
+	if (IRenderBackend* b = RenderBackendRuntime::Get_Active())
+		b->End_Scene(flip_frame);
+}
+void DX8Wrapper::Flip_To_Primary() {}
+
+void DX8Wrapper::Clear(bool clear_color, bool clear_z_stencil,
+                        const Vector3& color, float /*alpha*/,
+                        float z, unsigned int /*stencil*/)
+{
+	if (IRenderBackend* b = RenderBackendRuntime::Get_Active())
+	{
+		const Vector4 clearColor(color.X, color.Y, color.Z, 1.0f);
+		b->Clear(clear_color, clear_z_stencil, clearColor, z);
+	}
+}
+void DX8Wrapper::Set_Viewport(CONST D3DVIEWPORT8*) {}
+
+void DX8Wrapper::Set_Vertex_Buffer(const VertexBufferClass*, unsigned) {}
+void DX8Wrapper::Set_Vertex_Buffer(const DynamicVBAccessClass&) {}
+void DX8Wrapper::Set_Index_Buffer(const IndexBufferClass*, unsigned short) {}
+void DX8Wrapper::Set_Index_Buffer(const DynamicIBAccessClass&, unsigned short) {}
+
+// Methods already defined as inlines in dx8wrapper.h (with DX8CALL no-ops):
+// Get_Render_State, Set_Render_State, Release_Render_State,
+// Set_Projection_Transform_With_Z_Bias, Set_Transform, Get_Transform,
+// Set_World_Identity, Set_View_Identity, Is_World_Identity, Is_View_Identity,
+// Set_Shader, Get_Shader, Set_Texture, Set_Material, Set_Fog,
+// Convert_Color, Clamp_Color, Set_Alpha — not duplicated here.
+
+void DX8Wrapper::Set_Gamma(float, float, float, bool, bool) {}
+
+void DX8Wrapper::Apply_Render_State_Changes()
+{
+	// Phase 5h.4 — push the pending world / view transforms down to the
+	// active bgfx backend. The inline Set_Transform path in dx8wrapper.h
+	// already captures these into `render_state.world/view` and sets the
+	// WORLD_CHANGED / VIEW_CHANGED bits; here's where DX8 would call
+	// DX8CALL(SetTransform(…)). In bgfx mode we map to Set_World_Transform
+	// / Set_View_Transform. Projection still goes through DX8CALL (no-op
+	// in bgfx stubs) — 5h.5 will add the projection + material / light /
+	// shader dispatch.
+	IRenderBackend* b = RenderBackendRuntime::Get_Active();
+	if (b == nullptr)
+		return;
+	if (render_state_changed & WORLD_CHANGED)
+	{
+		b->Set_World_Transform(reinterpret_cast<const float*>(&render_state.world));
+		render_state_changed &= ~WORLD_CHANGED;
+	}
+	if (render_state_changed & VIEW_CHANGED)
+	{
+		b->Set_View_Transform(reinterpret_cast<const float*>(&render_state.view));
+		render_state_changed &= ~VIEW_CHANGED;
+	}
+	// Phase 5h.5 — projection is captured in the inline Set_Transform's
+	// D3DTS_PROJECTION case; the bit is set there. The DX8 path ran its own
+	// DX8CALL(SetTransform); here we publish the same matrix to bgfx.
+	if (render_state_changed & PROJECTION_CHANGED)
+	{
+		b->Set_Projection_Transform(reinterpret_cast<const float*>(&render_state.projection));
+		render_state_changed &= ~PROJECTION_CHANGED;
+	}
+}
+void DX8Wrapper::Apply_Default_State()
+{
+	// Phase 5h.4 — bgfx backend defaults to identity transforms, so when
+	// the game resets to "default state" it's the identity vs. whatever the
+	// previous frame left cached.
+	if (IRenderBackend* b = RenderBackendRuntime::Get_Active())
+	{
+		b->Set_World_Transform(kIdentityMat);
+		b->Set_View_Transform(kIdentityMat);
+		b->Set_Projection_Transform(kIdentityMat);
+	}
+}
+
+void DX8Wrapper::Set_Light(unsigned, const D3DLIGHT8*) {}
+void DX8Wrapper::Set_Light(unsigned, const LightClass&) {}
+void DX8Wrapper::Set_Light_Environment(LightEnvironmentClass* env) { Light_Environment = env; }
+
+void DX8Wrapper::Draw_Triangles(unsigned, unsigned short, unsigned short, unsigned short, unsigned short) {}
+void DX8Wrapper::Draw_Triangles(unsigned short, unsigned short, unsigned short, unsigned short) {}
+void DX8Wrapper::Draw_Strip(unsigned short, unsigned short, unsigned short, unsigned short) {}
+void DX8Wrapper::Draw_Sorting_IB_VB(unsigned, unsigned short, unsigned short, unsigned short, unsigned short) {}
+void DX8Wrapper::Draw(unsigned, unsigned short, unsigned short, unsigned short, unsigned short) {}
+
+IDirect3DTexture8* DX8Wrapper::_Create_DX8_Texture(unsigned int, unsigned int, WW3DFormat, MipCountType, D3DPOOL, bool) { return nullptr; }
+IDirect3DTexture8* DX8Wrapper::_Create_DX8_Texture(const char*, MipCountType) { return nullptr; }
+IDirect3DTexture8* DX8Wrapper::_Create_DX8_Texture(IDirect3DSurface8*, MipCountType) { return nullptr; }
+IDirect3DTexture8* DX8Wrapper::_Create_DX8_ZTexture(unsigned int, unsigned int, WW3DZFormat, MipCountType, D3DPOOL) { return nullptr; }
+IDirect3DCubeTexture8* DX8Wrapper::_Create_DX8_Cube_Texture(unsigned int, unsigned int, WW3DFormat, MipCountType, D3DPOOL, bool) { return nullptr; }
+IDirect3DVolumeTexture8* DX8Wrapper::_Create_DX8_Volume_Texture(unsigned int, unsigned int, unsigned int, WW3DFormat, MipCountType, D3DPOOL) { return nullptr; }
+IDirect3DSurface8* DX8Wrapper::_Create_DX8_Surface(unsigned int, unsigned int, WW3DFormat) { return nullptr; }
+IDirect3DSurface8* DX8Wrapper::_Create_DX8_Surface(const char*) { return nullptr; }
+IDirect3DSurface8* DX8Wrapper::_Get_DX8_Front_Buffer() { return nullptr; }
+SurfaceClass* DX8Wrapper::_Get_DX8_Back_Buffer(unsigned int) { return nullptr; }
+
+void DX8Wrapper::_Update_Texture(TextureClass*, TextureClass*) {}
+void DX8Wrapper::Flush_DX8_Resource_Manager(unsigned int) {}
+unsigned int DX8Wrapper::Get_Free_Texture_RAM() { return 0; }
+
+void DX8Wrapper::Begin_Statistics() {}
+void DX8Wrapper::End_Statistics() {}
+const DX8FrameStatistics& DX8Wrapper::Get_Last_Frame_Statistics() { static DX8FrameStatistics s; return s; }
+unsigned long DX8Wrapper::Get_FrameCount() { return FrameCount; }
+
+IDirect3DSwapChain8* DX8Wrapper::Create_Additional_Swap_Chain(HWND) { return nullptr; }
+TextureClass* DX8Wrapper::Create_Render_Target(int, int, WW3DFormat) { return nullptr; }
+void DX8Wrapper::Create_Render_Target(int, int, WW3DFormat, WW3DZFormat, TextureClass**, ZTextureClass**) {}
+void DX8Wrapper::Set_Render_Target(IDirect3DSurface8*, bool) {}
+void DX8Wrapper::Set_Render_Target(IDirect3DSurface8*, IDirect3DSurface8*) {}
+void DX8Wrapper::Set_Render_Target(IDirect3DSwapChain8*) {}
+void DX8Wrapper::Set_Render_Target_With_Z(TextureClass*, ZTextureClass*) {}
+
+bool DX8Wrapper::Reset_Device(bool) { return true; }
+
+bool DX8Wrapper::Registry_Save_Render_Device(const char*) { return false; }
+bool DX8Wrapper::Registry_Load_Render_Device(const char*, bool) { return false; }
+bool DX8Wrapper::Registry_Save_Render_Device(const char*, int, int, int, int, bool, int) { return false; }
+bool DX8Wrapper::Registry_Load_Render_Device(const char*, char*, int, int&, int&, int&, int&, int&) { return false; }
+
+void DX8Wrapper::Invalidate_Cached_Render_States() {
+	memset(RenderStates, 0xFF, sizeof(RenderStates));
+	memset(TextureStageStates, 0xFF, sizeof(TextureStageStates));
+}
+
+WW3DFormat DX8Wrapper::getBackBufferFormat() { return WW3D_FORMAT_UNKNOWN; }
+void DX8Wrapper::Generate_Mipmaps(IDirect3DBaseTexture8*) {}
+
+// Convert_Color, Clamp_Color, Convert_Color_Clamp, Set_Alpha — inline in header.
+
+const char* DX8Wrapper::Get_DX8_Render_State_Name(D3DRENDERSTATETYPE) { return ""; }
+const char* DX8Wrapper::Get_DX8_Texture_Stage_State_Name(D3DTEXTURESTAGESTATETYPE) { return ""; }
+void DX8Wrapper::Get_DX8_Render_State_Value_Name(StringClass&, D3DRENDERSTATETYPE, unsigned) {}
+void DX8Wrapper::Get_DX8_Texture_Stage_State_Value_Name(StringClass&, D3DTEXTURESTAGESTATETYPE, unsigned) {}
+const char* DX8Wrapper::Get_DX8_Texture_Address_Name(unsigned) { return ""; }
+const char* DX8Wrapper::Get_DX8_Texture_Filter_Name(unsigned) { return ""; }
+const char* DX8Wrapper::Get_DX8_Texture_Arg_Name(unsigned) { return ""; }
+const char* DX8Wrapper::Get_DX8_Texture_Op_Name(unsigned) { return ""; }
+const char* DX8Wrapper::Get_DX8_Texture_Transform_Flag_Name(unsigned) { return ""; }
+const char* DX8Wrapper::Get_DX8_ZBuffer_Type_Name(unsigned) { return ""; }
+const char* DX8Wrapper::Get_DX8_Fill_Mode_Name(unsigned) { return ""; }
+const char* DX8Wrapper::Get_DX8_Shade_Mode_Name(unsigned) { return ""; }
+const char* DX8Wrapper::Get_DX8_Blend_Name(unsigned) { return ""; }
+const char* DX8Wrapper::Get_DX8_Cull_Mode_Name(unsigned) { return ""; }
+const char* DX8Wrapper::Get_DX8_Cmp_Func_Name(unsigned) { return ""; }
+const char* DX8Wrapper::Get_DX8_Fog_Mode_Name(unsigned) { return ""; }
+const char* DX8Wrapper::Get_DX8_Stencil_Op_Name(unsigned) { return ""; }
+const char* DX8Wrapper::Get_DX8_Material_Source_Name(unsigned) { return ""; }
+const char* DX8Wrapper::Get_DX8_Vertex_Blend_Flag_Name(unsigned) { return ""; }
+const char* DX8Wrapper::Get_DX8_Patch_Edge_Style_Name(unsigned) { return ""; }
+const char* DX8Wrapper::Get_DX8_Debug_Monitor_Token_Name(unsigned) { return ""; }
+const char* DX8Wrapper::Get_DX8_Blend_Op_Name(unsigned) { return ""; }
+
+// Protected methods — only called by other DX8Wrapper methods (also stubs).
+bool DX8Wrapper::Create_Device() { return true; }
+void DX8Wrapper::Release_Device() {}
+void DX8Wrapper::Reset_Statistics() {}
+void DX8Wrapper::Enumerate_Devices() {}
+void DX8Wrapper::Set_Default_Global_Render_States() {}
+bool DX8Wrapper::Set_Any_Render_Device()
+{
+	// Pick safe defaults when the game hasn't negotiated a mode yet — this
+	// path is called during "first-run" configuration before the registry
+	// has a resolution saved. 800×600 windowed matches the smoke-test
+	// defaults and gets bgfx to a displayable state.
+	return BgfxBootstrap::Ensure_Init(s_pendingHwnd,
+	                                  ResolutionWidth  ? ResolutionWidth  : 800,
+	                                  ResolutionHeight ? ResolutionHeight : 600,
+	                                  true /* windowed */);
+}
+bool DX8Wrapper::Set_Render_Device(const char*, int w, int h, int, int windowed, bool)
+{
+	ResolutionWidth  = w > 0 ? w : ResolutionWidth;
+	ResolutionHeight = h > 0 ? h : ResolutionHeight;
+	IsWindowed       = (windowed != 0);
+	return BgfxBootstrap::Ensure_Init(s_pendingHwnd,
+	                                  ResolutionWidth,
+	                                  ResolutionHeight,
+	                                  IsWindowed);
+}
+bool DX8Wrapper::Set_Render_Device(int, int w, int h, int, int windowed, bool, bool, bool)
+{
+	ResolutionWidth  = w > 0 ? w : ResolutionWidth;
+	ResolutionHeight = h > 0 ? h : ResolutionHeight;
+	IsWindowed       = (windowed != 0);
+	return BgfxBootstrap::Ensure_Init(s_pendingHwnd,
+	                                  ResolutionWidth,
+	                                  ResolutionHeight,
+	                                  IsWindowed);
+}
+bool DX8Wrapper::Set_Next_Render_Device() { return false; }
+bool DX8Wrapper::Toggle_Windowed() { return false; }
+int  DX8Wrapper::Get_Render_Device_Count() { return 0; }
+int  DX8Wrapper::Get_Render_Device() { return 0; }
+const RenderDeviceDescClass& DX8Wrapper::Get_Render_Device_Desc(int) { static RenderDeviceDescClass d; return d; }
+const char* DX8Wrapper::Get_Render_Device_Name(int) { return "bgfx"; }
+bool DX8Wrapper::Set_Device_Resolution(int w, int h, int, int, bool windowed)
+{
+	ResolutionWidth  = w > 0 ? w : ResolutionWidth;
+	ResolutionHeight = h > 0 ? h : ResolutionHeight;
+	IsWindowed       = windowed;
+	// If bgfx is already up, Ensure_Init with new dims triggers Reset in
+	// place; otherwise it's a no-op until Init brings the hwnd.
+	return BgfxBootstrap::Ensure_Init(s_pendingHwnd,
+	                                  ResolutionWidth,
+	                                  ResolutionHeight,
+	                                  IsWindowed);
+}
+void DX8Wrapper::Get_Device_Resolution(int& w, int& h, int& bits, bool& windowed)
+{ w = ResolutionWidth; h = ResolutionHeight; bits = BitDepth; windowed = IsWindowed; }
+void DX8Wrapper::Get_Render_Target_Resolution(int& w, int& h, int& bits, bool& windowed)
+{ w = ResolutionWidth; h = ResolutionHeight; bits = BitDepth; windowed = IsWindowed; }
+void DX8Wrapper::Resize_And_Position_Window() {}
+bool DX8Wrapper::Find_Color_And_Z_Mode(int, int, int, D3DFORMAT*, D3DFORMAT*, D3DFORMAT*) { return false; }
+bool DX8Wrapper::Find_Color_Mode(D3DFORMAT, int, int, UINT*) { return false; }
+bool DX8Wrapper::Find_Z_Mode(D3DFORMAT, D3DFORMAT, D3DFORMAT*) { return false; }
+bool DX8Wrapper::Test_Z_Mode(D3DFORMAT, D3DFORMAT, D3DFORMAT) { return false; }
+void DX8Wrapper::Compute_Caps(WW3DFormat) {}
+void DX8Wrapper::Set_Swap_Interval(int) {}
+int  DX8Wrapper::Get_Swap_Interval() { return 0; }
+void DX8Wrapper::Set_Polygon_Mode(int) {}
+
+#endif // RTS_RENDERER_DX8
