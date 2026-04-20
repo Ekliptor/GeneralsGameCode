@@ -143,11 +143,29 @@ class SurfaceClass : public W3DMPO, public RefCountClass
 
 		WW3DFormat Get_Surface_Format() const { return SurfaceFormat; }
 
+#ifndef RTS_RENDERER_DX8
+		// Phase 5h.31 — bgfx-mode CPU-backed surface bookkeeping.
+		// A bgfx SurfaceClass owns a CPU pixel buffer (CpuPixels) sized
+		// CpuPitch * CpuHeight. Lock() returns CpuPixels directly; Unlock()
+		// optionally uploads the buffer into AssociatedTextureHandle via
+		// IRenderBackend::Update_Texture_RGBA8 when the handle is bound.
+		void Set_Associated_Texture(uintptr_t handle) { AssociatedTextureHandle = handle; }
+		uintptr_t Get_Associated_Texture() const { return AssociatedTextureHandle; }
+#endif
+
 	private:
 
 		// Direct3D surface object
 		IDirect3DSurface8 *D3DSurface;
 
 		WW3DFormat SurfaceFormat;
+
+#ifndef RTS_RENDERER_DX8
+		unsigned char* CpuPixels = nullptr;
+		unsigned CpuWidth = 0;
+		unsigned CpuHeight = 0;
+		unsigned CpuPitch = 0;
+		uintptr_t AssociatedTextureHandle = 0;
+#endif
 	friend class TextureClass;
 };

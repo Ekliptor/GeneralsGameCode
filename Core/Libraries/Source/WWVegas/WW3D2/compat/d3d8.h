@@ -100,14 +100,44 @@ struct IDirect3D8 {
     unsigned long Release() { return 0; }
 };
 
+// Forward decls for Create* stubs on IDirect3DDevice8 — the full declarations
+// live later in this section.
+struct IDirect3DVertexBuffer8;
+struct IDirect3DIndexBuffer8;
+
 struct IDirect3DDevice8 {
     unsigned long AddRef()  { return 1; }
     unsigned long Release() { return 0; }
+    // Phase 5h.15 — no-op resource-creation stubs so DX8VertexBufferClass +
+    // DX8IndexBufferClass constructors compile in bgfx mode. Runtime-cold
+    // (nothing instantiates those classes in bgfx); zero the output pointer
+    // on success so any accidental caller fails loudly. Pool/format enums
+    // are defined later in this header — use `UINT` here to avoid a
+    // forward-declare mismatch; callers cast from the real enum via the
+    // implicit promotion that D3D8's headers rely on.
+    HRESULT CreateVertexBuffer(UINT /*length*/, DWORD /*usage*/, DWORD /*fvf*/,
+                               UINT /*pool*/, IDirect3DVertexBuffer8** ppVB)
+    {
+        if (ppVB) *ppVB = nullptr;
+        return S_OK;
+    }
+    HRESULT CreateIndexBuffer(UINT /*length*/, DWORD /*usage*/, UINT /*fmt*/,
+                              UINT /*pool*/, IDirect3DIndexBuffer8** ppIB)
+    {
+        if (ppIB) *ppIB = nullptr;
+        return S_OK;
+    }
+    HRESULT ResourceManagerDiscardBytes(DWORD /*bytes*/) { return S_OK; }
 };
 
 struct IDirect3DBaseTexture8 {
     unsigned long AddRef()  { return 1; }
     unsigned long Release() { return 0; }
+    // Phase 5h.21 — priority no-op stubs. The real DX8 values govern texture
+    // LRU behavior; bgfx has its own texture cache so the priority is
+    // meaningless here. Fixed return (0) keeps callers deterministic.
+    DWORD GetPriority() { return 0; }
+    DWORD SetPriority(DWORD /*new_priority*/) { return 0; }
 };
 
 struct IDirect3DTexture8 : IDirect3DBaseTexture8 {};
@@ -127,11 +157,28 @@ struct IDirect3DSwapChain8 {
 struct IDirect3DVertexBuffer8 {
     unsigned long AddRef()  { return 1; }
     unsigned long Release() { return 0; }
+    // Phase 5h.14 — no-op Lock/Unlock so the VertexBufferClass::WriteLockClass
+    // DX8 dispatch path compiles. Runtime-cold in bgfx mode (no VBs of
+    // BUFFER_TYPE_DX8 are instantiated yet); pass-through returns a null
+    // payload so any accidental caller fails loudly rather than silently
+    // writing into the void.
+    HRESULT Lock(UINT /*OffsetToLock*/, UINT /*SizeToLock*/, BYTE** ppbData, DWORD /*Flags*/)
+    {
+        if (ppbData) *ppbData = nullptr;
+        return S_OK;
+    }
+    HRESULT Unlock() { return S_OK; }
 };
 
 struct IDirect3DIndexBuffer8 {
     unsigned long AddRef()  { return 1; }
     unsigned long Release() { return 0; }
+    HRESULT Lock(UINT /*OffsetToLock*/, UINT /*SizeToLock*/, BYTE** ppbData, DWORD /*Flags*/)
+    {
+        if (ppbData) *ppbData = nullptr;
+        return S_OK;
+    }
+    HRESULT Unlock() { return S_OK; }
 };
 
 typedef IDirect3D8*              LPDIRECT3D8;

@@ -1,0 +1,83 @@
+name: macOS bgfx build
+
+# Phase 6g — First non-Windows CI job for the cross-platform port.
+# Verifies that `cmake -S . -B build -DRTS_BUILD_CORE_EXTRAS=ON` on macOS
+# arm64 produces a working corei_bgfx + bgfx test suite. Green state = the
+# Phase 5h.36 invariants survived the most recent PR.
+#
+# Not yet covered (tracked as Phase 6g deferred):
+#   - Windows bgfx 64-bit (needs RTS_WINDOWS_64BIT + windows-latest runner)
+#   - macOS universal (needs universal SDL3 / OpenAL / ffmpeg)
+#   - Notarized .app artifact (needs Apple Developer credentials)
+#   - Replay-parity regression test (needs real game assets)
+
+permissions:
+  contents: read
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'Core/**'
+      - 'cmake/**'
+      - 'tests/**'
+      - 'CMakeLists.txt'
+      - '.github/workflows/build-macos-bgfx.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'Core/**'
+      - 'cmake/**'
+      - 'tests/**'
+      - 'CMakeLists.txt'
+      - '.github/workflows/build-macos-bgfx.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build-macos-arm64-bgfx:
+    name: macOS arm64 · bgfx
+    runs-on: macos-14
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          submodules: recursive
+
+      - name: Install dependencies (Homebrew)
+        run: |
+          brew update
+          brew install sdl3 openal-soft ffmpeg cmake ninja
+
+      - name: Configure (bgfx / openal / ffmpeg / sdl — defaults on non-Windows)
+        run: |
+          cmake -S . -B build_bgfx -G Ninja \
+            -DRTS_BUILD_CORE_EXTRAS=ON \
+            -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build corei_bgfx + z_ww3d2
+        run: cmake --build build_bgfx --target corei_bgfx z_ww3d2 -j
+
+      - name: Build bgfx test suite
+        run: |
+          TARGETS=$(ls build_bgfx/tests | grep -E '^tst_bgfx_')
+          for t in $TARGETS; do cmake --build build_bgfx --target "$t" -j; done
+
+      - name: Run bgfx tests
+        run: |
+          PASS=0; FAIL=0
+          for t in build_bgfx/tests/tst_bgfx_*/tst_bgfx_*; do
+            [ -x "$t" ] || continue
+            name=$(basename "$t")
+            if "$t" 2>&1 | tail -1 | grep -q PASSED; then
+              PASS=$((PASS+1)); echo "PASS $name"
+            else
+              FAIL=$((FAIL+1)); echo "FAIL $name"
+            fi
+          done
+          echo "Summary: PASS=$PASS FAIL=$FAIL"
+          test "$FAIL" -eq 0

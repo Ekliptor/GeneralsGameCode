@@ -38,16 +38,15 @@
  * - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
 #include "texturefilter.h"
-#ifdef RTS_RENDERER_DX8
-#include "dx8wrapper.h"
 
-unsigned _MinTextureFilters[MAX_TEXTURE_STAGES][TextureFilterClass::FILTER_TYPE_COUNT];
-unsigned _MagTextureFilters[MAX_TEXTURE_STAGES][TextureFilterClass::FILTER_TYPE_COUNT];
-unsigned _MipMapFilters[MAX_TEXTURE_STAGES][TextureFilterClass::FILTER_TYPE_COUNT];
+#ifndef RTS_RENDERER_DX8
+#include "BackendDescriptors.h"
+#include "IRenderBackend.h"
+#include "RenderBackendRuntime.h"
+#endif
 
-/*************************************************************************
-**                             TextureFilterClass
-*************************************************************************/
+// Phase 5h.25 — ctor is pure member-init, no DX8 API; moved above the guard
+// so TextureClass (which owns a Filter) can be constructed in bgfx mode.
 TextureFilterClass::TextureFilterClass(MipCountType mip_level_count)
 :	TextureMinFilter(FILTER_TYPE_DEFAULT),
 	TextureMagFilter(FILTER_TYPE_DEFAULT),
@@ -63,6 +62,13 @@ TextureFilterClass::TextureFilterClass(MipCountType mip_level_count)
 		MipMapFilter=FILTER_TYPE_NONE;
 	}
 }
+
+#ifdef RTS_RENDERER_DX8
+#include "dx8wrapper.h"
+
+unsigned _MinTextureFilters[MAX_TEXTURE_STAGES][TextureFilterClass::FILTER_TYPE_COUNT];
+unsigned _MagTextureFilters[MAX_TEXTURE_STAGES][TextureFilterClass::FILTER_TYPE_COUNT];
+unsigned _MipMapFilters[MAX_TEXTURE_STAGES][TextureFilterClass::FILTER_TYPE_COUNT];
 
 //**********************************************************************************************
 //! Apply filters (legacy)
@@ -321,3 +327,89 @@ void TextureFilterClass::_Set_Default_Mip_Filter(FilterType filter)
 	}
 }
 #endif // RTS_RENDERER_DX8
+
+#ifndef RTS_RENDERER_DX8
+// Phase 5h.34 — bgfx-mode `TextureFilterClass` impl.
+//
+// Translates `FilterType` + `TxtAddrMode` into a `SamplerStateDesc` and pushes
+// it to the active `IRenderBackend`. The backend caches it per stage and OR-s
+// the flags into its next `setTexture` call. Matches the DX8 path's per-stage
+// state semantics: Apply(stage) sets the sampler for that stage only.
+
+namespace {
+
+// Default anisotropy level set by `_Set_Max_Anisotropy`. 1 == off.
+unsigned g_defaultMaxAnisotropy = 1;
+
+SamplerStateDesc::Filter TranslateFilter(TextureFilterClass::FilterType t)
+{
+	switch (t)
+	{
+	case TextureFilterClass::FILTER_TYPE_NONE:     return SamplerStateDesc::FILTER_POINT;
+	case TextureFilterClass::FILTER_TYPE_FAST:     return SamplerStateDesc::FILTER_LINEAR;
+	case TextureFilterClass::FILTER_TYPE_BEST:
+	case TextureFilterClass::FILTER_TYPE_DEFAULT:  return SamplerStateDesc::FILTER_LINEAR;
+	default:                                       return SamplerStateDesc::FILTER_LINEAR;
+	}
+}
+
+SamplerStateDesc::AddressMode TranslateAddress(TextureFilterClass::TxtAddrMode m)
+{
+	return (m == TextureFilterClass::TEXTURE_ADDRESS_CLAMP)
+		? SamplerStateDesc::ADDRESS_CLAMP
+		: SamplerStateDesc::ADDRESS_WRAP;
+}
+
+} // namespace
+
+void TextureFilterClass::Apply(unsigned int stage)
+{
+	IRenderBackend* backend = RenderBackendRuntime::Get_Active();
+	if (backend == nullptr)
+		return;
+
+	SamplerStateDesc desc;
+	desc.minFilter = TranslateFilter(TextureMinFilter);
+	desc.magFilter = TranslateFilter(TextureMagFilter);
+
+	// MipMapFilter == FILTER_TYPE_NONE → mipmapping disabled (force
+	// MIP_POINT + hasMips=false). Otherwise emit linear mip filtering, and
+	// let the sampler code clear the MIP_LINEAR bit if `hasMips` is false.
+	if (MipMapFilter == FILTER_TYPE_NONE)
+	{
+		desc.mipFilter = SamplerStateDesc::FILTER_POINT;
+		desc.hasMips   = false;
+	}
+	else
+	{
+		desc.mipFilter = SamplerStateDesc::FILTER_LINEAR;
+		desc.hasMips   = true;
+	}
+
+	desc.addressU = TranslateAddress(UAddressMode);
+	desc.addressV = TranslateAddress(VAddressMode);
+	desc.maxAnisotropy = static_cast<uint8_t>(g_defaultMaxAnisotropy);
+
+	backend->Set_Sampler_State(stage, desc);
+}
+
+void TextureFilterClass::_Init_Filters(TextureFilterMode /*filter_type*/)
+{
+	// bgfx picks sampler state per-draw from `SamplerStateDesc` rather than
+	// from a global caps-derived table — nothing to initialize here.
+}
+
+void TextureFilterClass::_Set_Max_Anisotropy(AnisotropicFilterMode mode)
+{
+	g_defaultMaxAnisotropy = static_cast<unsigned>(mode);
+}
+
+void TextureFilterClass::Set_Mip_Mapping(FilterType mipmap)
+{
+	MipMapFilter = mipmap;
+}
+
+void TextureFilterClass::_Set_Default_Min_Filter(FilterType /*filter*/) {}
+void TextureFilterClass::_Set_Default_Mag_Filter(FilterType /*filter*/) {}
+void TextureFilterClass::_Set_Default_Mip_Filter(FilterType /*filter*/) {}
+#endif // !RTS_RENDERER_DX8

@@ -935,4 +935,508 @@ void SurfaceClass::Hue_Shift(const Vector3 &hsv_shift)
 
 	Unlock();
 }
+#else // RTS_RENDERER_DX8
+
+// =============================================================================
+// Phase 5h.31 — bgfx-mode SurfaceClass
+// =============================================================================
+//
+// A bgfx-mode surface is a CPU-side pixel buffer that optionally mirrors to a
+// bgfx texture on Unlock(). There is no D3DSurface; D3DSurface stays nullptr
+// so Peek_D3D_Surface()/Attach/Detach behave as no-ops. The CPU buffer is the
+// sole source of truth. Callers that want the contents to reach the GPU call
+// Set_Associated_Texture(handle) on a backend-allocated texture; Unlock()
+// then routes the buffer through IRenderBackend::Update_Texture_RGBA8.
+//
+// The DX8 path (above) is deep — D3DX blits, LockRect, surface-to-surface
+// copies — and is not reproduced here. The bgfx branch covers the operations
+// that have actual bgfx-mode callers today (Lock/Unlock, Clear, byte-array
+// copies, CreateCopy, Get_Description) plus the format-agnostic helpers that
+// operate on a caller-supplied pointer (Draw_Pixel, Draw_H_Line, Get_Pixel).
+// More involved paths — Stretch_Copy via D3DX, Hue_Shift, Is_Monochrome,
+// FindBB, Is_Transparent_Column, surface-to-surface Copy — are provided as
+// CPU implementations where the work is straightforward, or as explicit
+// no-ops with a one-time log where a real D3DX dependency is implicit.
+
+#include "ww3dformat.h"
+#include "vector3.h"
+#include "vector2i.h"
+#include "IRenderBackend.h"
+#include "RenderBackendRuntime.h"
+#include <cstring>
+#include <cstdio>
+
+namespace {
+
+// Local copy of Get_Bytes_Per_Pixel to keep this TU free of the ww3dformat.cpp
+// dependency chain (which pulls dx8wrapper.h transitively). Identical table
+// to ww3dformat.cpp::Get_Bytes_Per_Pixel; update in lockstep if formats gain
+// new entries.
+unsigned Surface_BPP(WW3DFormat format)
+{
+	switch (format) {
+	case WW3D_FORMAT_A8R8G8B8:
+	case WW3D_FORMAT_X8R8G8B8:
+	case WW3D_FORMAT_X8L8V8U8:
+		return 4;
+	case WW3D_FORMAT_R8G8B8:
+		return 3;
+	case WW3D_FORMAT_R5G6B5:
+	case WW3D_FORMAT_X1R5G5B5:
+	case WW3D_FORMAT_A1R5G5B5:
+	case WW3D_FORMAT_A4R4G4B4:
+	case WW3D_FORMAT_A8R3G3B2:
+	case WW3D_FORMAT_X4R4G4B4:
+	case WW3D_FORMAT_A8P8:
+	case WW3D_FORMAT_A8L8:
+	case WW3D_FORMAT_U8V8:
+	case WW3D_FORMAT_L6V5U5:
+		return 2;
+	case WW3D_FORMAT_R3G3B2:
+	case WW3D_FORMAT_A8:
+	case WW3D_FORMAT_P8:
+	case WW3D_FORMAT_L8:
+	case WW3D_FORMAT_A4L4:
+		return 1;
+	default: break;
+	}
+	return 0;
+}
+
+// Single-shot warn helper so missing bgfx-mode paths don't spam logs but stay
+// visible during bring-up.
+void Surface_Warn_Once(const char* tag)
+{
+	static const char* seen[8] = {};
+	for (const char* s : seen) if (s == tag) return;
+	for (auto& slot : seen) if (slot == nullptr) { slot = tag; break; }
+	std::fprintf(stderr, "[SurfaceClass:bgfx] %s is a stub — no bgfx callers expected yet\n", tag);
+}
+
+// Route the CPU buffer into a bgfx texture if an association exists. Only
+// RGBA8-ish 32-bit formats are uploaded; smaller/compressed formats are
+// Phase 5h.35 — convert one source pixel of `fmt` (at `sp`) into RGBA8 at
+// `dp`. Returns false for unsupported formats; caller falls back to skipping
+// the upload.
+//
+// Source layouts (DX8 memory order):
+//   A8R8G8B8   : B G R A   (4 bytes, little-endian 0xAARRGGBB dword)
+//   X8R8G8B8   : B G R X   (4 bytes, alpha forced to 0xFF)
+//   A4R4G4B4   : 2 bytes LE — bits [15..12]=A [11..8]=R [7..4]=G [3..0]=B
+//   X4R4G4B4   : 2 bytes LE — alpha forced to 0xFF
+//   R5G6B5     : 2 bytes LE — bits [15..11]=R [10..5]=G [4..0]=B
+//   A1R5G5B5   : 2 bytes LE — bit 15=A, [14..10]=R [9..5]=G [4..0]=B
+//   X1R5G5B5   : alpha forced to 0xFF
+//   A8         : 1 byte — luminance forced white, alpha = byte
+//   L8         : 1 byte — luminance replicated, alpha = 0xFF
+//   A8L8       : 2 bytes — [0]=L, [1]=A
+//   A4L4       : 1 byte — [7..4]=A, [3..0]=L (each expanded to 8 bits)
+bool ConvertPixelToRGBA8(WW3DFormat fmt, const unsigned char* sp, unsigned char* dp)
+{
+	switch (fmt)
+	{
+	case WW3D_FORMAT_A8R8G8B8:
+		dp[0] = sp[2]; dp[1] = sp[1]; dp[2] = sp[0]; dp[3] = sp[3];
+		return true;
+
+	case WW3D_FORMAT_X8R8G8B8:
+		dp[0] = sp[2]; dp[1] = sp[1]; dp[2] = sp[0]; dp[3] = 0xFF;
+		return true;
+
+	case WW3D_FORMAT_A4R4G4B4:
+	case WW3D_FORMAT_X4R4G4B4:
+	{
+		const uint16_t v = uint16_t(sp[0]) | (uint16_t(sp[1]) << 8);
+		const uint8_t a4 = (v >> 12) & 0xF;
+		const uint8_t r4 = (v >> 8)  & 0xF;
+		const uint8_t g4 = (v >> 4)  & 0xF;
+		const uint8_t b4 =  v        & 0xF;
+		// 4-bit → 8-bit expansion: (x << 4) | x replicates the nibble so 0xF → 0xFF.
+		dp[0] = (r4 << 4) | r4;
+		dp[1] = (g4 << 4) | g4;
+		dp[2] = (b4 << 4) | b4;
+		dp[3] = (fmt == WW3D_FORMAT_X4R4G4B4) ? uint8_t(0xFF) : uint8_t((a4 << 4) | a4);
+		return true;
+	}
+
+	case WW3D_FORMAT_R5G6B5:
+	{
+		const uint16_t v = uint16_t(sp[0]) | (uint16_t(sp[1]) << 8);
+		const uint8_t r5 = (v >> 11) & 0x1F;
+		const uint8_t g6 = (v >> 5)  & 0x3F;
+		const uint8_t b5 =  v        & 0x1F;
+		// 5-bit → 8-bit: (x << 3) | (x >> 2). 6-bit → 8-bit: (x << 2) | (x >> 4).
+		dp[0] = (r5 << 3) | (r5 >> 2);
+		dp[1] = (g6 << 2) | (g6 >> 4);
+		dp[2] = (b5 << 3) | (b5 >> 2);
+		dp[3] = 0xFF;
+		return true;
+	}
+
+	case WW3D_FORMAT_A1R5G5B5:
+	case WW3D_FORMAT_X1R5G5B5:
+	{
+		const uint16_t v = uint16_t(sp[0]) | (uint16_t(sp[1]) << 8);
+		const uint8_t a1 = (v >> 15) & 0x1;
+		const uint8_t r5 = (v >> 10) & 0x1F;
+		const uint8_t g5 = (v >> 5)  & 0x1F;
+		const uint8_t b5 =  v        & 0x1F;
+		dp[0] = (r5 << 3) | (r5 >> 2);
+		dp[1] = (g5 << 3) | (g5 >> 2);
+		dp[2] = (b5 << 3) | (b5 >> 2);
+		dp[3] = (fmt == WW3D_FORMAT_X1R5G5B5) ? uint8_t(0xFF) : uint8_t(a1 ? 0xFF : 0x00);
+		return true;
+	}
+
+	case WW3D_FORMAT_A8:
+		dp[0] = 0xFF; dp[1] = 0xFF; dp[2] = 0xFF; dp[3] = sp[0];
+		return true;
+
+	case WW3D_FORMAT_L8:
+		dp[0] = sp[0]; dp[1] = sp[0]; dp[2] = sp[0]; dp[3] = 0xFF;
+		return true;
+
+	case WW3D_FORMAT_A8L8:
+		dp[0] = sp[0]; dp[1] = sp[0]; dp[2] = sp[0]; dp[3] = sp[1];
+		return true;
+
+	case WW3D_FORMAT_A4L4:
+	{
+		const uint8_t a4 = (sp[0] >> 4) & 0xF;
+		const uint8_t l4 =  sp[0]       & 0xF;
+		const uint8_t l8 = (l4 << 4) | l4;
+		dp[0] = l8; dp[1] = l8; dp[2] = l8;
+		dp[3] = (a4 << 4) | a4;
+		return true;
+	}
+
+	default:
+		return false;
+	}
+}
+
+// Bridges the CPU-side surface pixels into `IRenderBackend::Update_Texture_RGBA8`.
+// All formats handled by `ConvertPixelToRGBA8` are supported; everything else
+// (DXT, bumpmap, palette, R8G8B8 24-bit) is skipped with a one-shot warning.
+void Upload_To_Associated_Texture(uintptr_t handle, WW3DFormat fmt,
+	const unsigned char* src, unsigned w, unsigned h, unsigned pitch)
+{
+	if (handle == 0 || src == nullptr || w == 0 || h == 0) return;
+	IRenderBackend* backend = RenderBackendRuntime::Get_Active();
+	if (backend == nullptr) return;
+
+	const unsigned bpp = Surface_BPP(fmt);
+	if (bpp == 0)
+	{
+		Surface_Warn_Once("Upload_To_Associated_Texture: zero-bpp format (compressed/palette?)");
+		return;
+	}
+
+	const unsigned byteSize = w * h * 4u;
+	unsigned char* rgba = new unsigned char[byteSize];
+	bool fmtSupported = true;
+
+	for (unsigned y = 0; y < h && fmtSupported; ++y)
+	{
+		const unsigned char* row = src + y * pitch;
+		unsigned char* drow = rgba + y * w * 4u;
+		for (unsigned x = 0; x < w; ++x)
+		{
+			if (!ConvertPixelToRGBA8(fmt, row + x * bpp, drow + x * 4))
+			{
+				fmtSupported = false;
+				break;
+			}
+		}
+	}
+
+	if (fmtSupported)
+	{
+		backend->Update_Texture_RGBA8(handle, rgba,
+		                              static_cast<uint16_t>(w),
+		                              static_cast<uint16_t>(h));
+	}
+	else
+	{
+		Surface_Warn_Once("Upload_To_Associated_Texture: unsupported format, skipped");
+	}
+	delete[] rgba;
+}
+
+} // namespace
+
+SurfaceClass::SurfaceClass(unsigned width, unsigned height, WW3DFormat format) :
+	D3DSurface(nullptr),
+	SurfaceFormat(format)
+{
+	WWASSERT(width);
+	WWASSERT(height);
+	CpuWidth = width;
+	CpuHeight = height;
+	const unsigned bpp = Surface_BPP(format);
+	CpuPitch = width * (bpp ? bpp : 1);
+	CpuPixels = new unsigned char[CpuPitch * CpuHeight];
+	std::memset(CpuPixels, 0, CpuPitch * CpuHeight);
+}
+
+SurfaceClass::SurfaceClass(const char* /*filename*/) :
+	D3DSurface(nullptr),
+	SurfaceFormat(WW3D_FORMAT_A8R8G8B8)
+{
+	// File-loaded surfaces in bgfx mode would need a bimg-backed loader.
+	// Deferred to a future phase; for now allocate a 1x1 opaque-black surface
+	// so ref-count/attach semantics stay sane if a caller hits this path.
+	CpuWidth = 1;
+	CpuHeight = 1;
+	CpuPitch = 4;
+	CpuPixels = new unsigned char[4];
+	CpuPixels[0] = 0; CpuPixels[1] = 0; CpuPixels[2] = 0; CpuPixels[3] = 0xFF;
+	Surface_Warn_Once("SurfaceClass(const char*)");
+}
+
+SurfaceClass::SurfaceClass(IDirect3DSurface8* /*d3d_surface*/) :
+	D3DSurface(nullptr),
+	SurfaceFormat(WW3D_FORMAT_UNKNOWN)
+{
+	// bgfx has no IDirect3DSurface8 analogue; caller-supplied surfaces are
+	// not meaningful here. Leave CpuPixels null; any Lock() returns nullptr.
+}
+
+SurfaceClass::~SurfaceClass()
+{
+	delete[] CpuPixels;
+	CpuPixels = nullptr;
+}
+
+void SurfaceClass::Get_Description(SurfaceDescription& surface_desc)
+{
+	surface_desc.Format = SurfaceFormat;
+	surface_desc.Width  = CpuWidth;
+	surface_desc.Height = CpuHeight;
+}
+
+unsigned int SurfaceClass::Get_Bytes_Per_Pixel()
+{
+	return Surface_BPP(SurfaceFormat);
+}
+
+SurfaceClass::LockedSurfacePtr SurfaceClass::Lock(int* pitch)
+{
+	if (pitch) *pitch = static_cast<int>(CpuPitch);
+	return static_cast<LockedSurfacePtr>(CpuPixels);
+}
+
+SurfaceClass::LockedSurfacePtr SurfaceClass::Lock(int* pitch, const Vector2i& min, const Vector2i& /*max*/)
+{
+	if (pitch) *pitch = static_cast<int>(CpuPitch);
+	if (CpuPixels == nullptr) return nullptr;
+	const unsigned bpp = Surface_BPP(SurfaceFormat);
+	const unsigned offset = static_cast<unsigned>(min.J) * CpuPitch
+	                      + static_cast<unsigned>(min.I) * bpp;
+	return static_cast<LockedSurfacePtr>(CpuPixels + offset);
+}
+
+void SurfaceClass::Unlock()
+{
+	Upload_To_Associated_Texture(AssociatedTextureHandle, SurfaceFormat,
+	                             CpuPixels, CpuWidth, CpuHeight, CpuPitch);
+}
+
+void SurfaceClass::Clear()
+{
+	if (CpuPixels) std::memset(CpuPixels, 0, CpuPitch * CpuHeight);
+	Upload_To_Associated_Texture(AssociatedTextureHandle, SurfaceFormat,
+	                             CpuPixels, CpuWidth, CpuHeight, CpuPitch);
+}
+
+void SurfaceClass::Copy(const unsigned char* other)
+{
+	if (!CpuPixels || !other) return;
+	const unsigned bpp = Surface_BPP(SurfaceFormat);
+	const unsigned rowBytes = CpuWidth * bpp;
+	for (unsigned y = 0; y < CpuHeight; ++y) {
+		std::memcpy(CpuPixels + y * CpuPitch, other + y * rowBytes, rowBytes);
+	}
+	Upload_To_Associated_Texture(AssociatedTextureHandle, SurfaceFormat,
+	                             CpuPixels, CpuWidth, CpuHeight, CpuPitch);
+}
+
+void SurfaceClass::Copy(const Vector2i& min, const Vector2i& max, const unsigned char* other)
+{
+	if (!CpuPixels || !other) return;
+	const unsigned bpp = Surface_BPP(SurfaceFormat);
+	const int dx = max.I - min.I;
+	if (dx <= 0) return;
+	for (int y = min.J; y < max.J; ++y) {
+		unsigned char* dst = CpuPixels + y * CpuPitch + min.I * bpp;
+		const unsigned char* srcRow = other + (y * CpuWidth + min.I) * bpp;
+		std::memcpy(dst, srcRow, dx * bpp);
+	}
+	Upload_To_Associated_Texture(AssociatedTextureHandle, SurfaceFormat,
+	                             CpuPixels, CpuWidth, CpuHeight, CpuPitch);
+}
+
+void SurfaceClass::Copy(
+	unsigned int dstx, unsigned int dsty,
+	unsigned int srcx, unsigned int srcy,
+	unsigned int width, unsigned int height,
+	const SurfaceClass* other)
+{
+	if (!other || !CpuPixels || !other->CpuPixels) return;
+	if (SurfaceFormat != other->SurfaceFormat) {
+		Surface_Warn_Once("Copy(surface->surface) format mismatch");
+		return;
+	}
+	const unsigned bpp = Surface_BPP(SurfaceFormat);
+	for (unsigned j = 0; j < height; ++j) {
+		unsigned char* d = CpuPixels + (dsty + j) * CpuPitch + dstx * bpp;
+		const unsigned char* s = other->CpuPixels + (srcy + j) * other->CpuPitch + srcx * bpp;
+		std::memcpy(d, s, width * bpp);
+	}
+	Upload_To_Associated_Texture(AssociatedTextureHandle, SurfaceFormat,
+	                             CpuPixels, CpuWidth, CpuHeight, CpuPitch);
+}
+
+void SurfaceClass::Stretch_Copy(
+	unsigned int /*dstx*/, unsigned int /*dsty*/,
+	unsigned int /*dstwidth*/, unsigned int /*dstheight*/,
+	unsigned int /*srcx*/, unsigned int /*srcy*/,
+	unsigned int /*srcwidth*/, unsigned int /*srcheight*/,
+	const SurfaceClass* /*other*/)
+{
+	// DX8 path uses D3DXLoadSurfaceFromSurface for filtered resizing. No
+	// bgfx-mode caller today; defer CPU-side resampling until one shows up.
+	Surface_Warn_Once("Stretch_Copy");
+}
+
+unsigned char* SurfaceClass::CreateCopy(int* width, int* height, int* size, bool flip)
+{
+	const unsigned bpp = Surface_BPP(SurfaceFormat);
+	if (width)  *width  = static_cast<int>(CpuWidth);
+	if (height) *height = static_cast<int>(CpuHeight);
+	if (size)   *size   = static_cast<int>(bpp);
+	const unsigned rowBytes = CpuWidth * bpp;
+	unsigned char* out = W3DNEWARRAY unsigned char[CpuHeight * rowBytes];
+	if (CpuPixels == nullptr) {
+		std::memset(out, 0, CpuHeight * rowBytes);
+		return out;
+	}
+	for (unsigned y = 0; y < CpuHeight; ++y) {
+		const unsigned char* srcRow = CpuPixels + (flip ? (CpuHeight - 1 - y) : y) * CpuPitch;
+		std::memcpy(out + y * rowBytes, srcRow, rowBytes);
+	}
+	return out;
+}
+
+void SurfaceClass::FindBB(Vector2i* min, Vector2i* max)
+{
+	// CPU-side alpha scan. Preserves DX8 semantics but only handles the
+	// BGRA8-alike paths in bgfx mode; other formats return the caller's
+	// original bbox unchanged.
+	if (!CpuPixels || !min || !max) return;
+	if (SurfaceFormat != WW3D_FORMAT_A8R8G8B8) {
+		Surface_Warn_Once("FindBB format other than A8R8G8B8");
+		return;
+	}
+	Vector2i realmin = *max;
+	Vector2i realmax = *min;
+	for (int y = min->J; y < max->J; ++y) {
+		for (int x = min->I; x < max->I; ++x) {
+			const unsigned char a = CpuPixels[y * CpuPitch + x * 4 + 3];
+			if (a) {
+				if (x < realmin.I) realmin.I = x;
+				if (x > realmax.I) realmax.I = x;
+				if (y < realmin.J) realmin.J = y;
+				if (y > realmax.J) realmax.J = y;
+			}
+		}
+	}
+	*min = realmin;
+	*max = realmax;
+}
+
+bool SurfaceClass::Is_Transparent_Column(unsigned int column)
+{
+	if (!CpuPixels || column >= CpuWidth) return true;
+	if (SurfaceFormat != WW3D_FORMAT_A8R8G8B8) {
+		Surface_Warn_Once("Is_Transparent_Column format other than A8R8G8B8");
+		return false;
+	}
+	for (unsigned y = 0; y < CpuHeight; ++y) {
+		if (CpuPixels[y * CpuPitch + column * 4 + 3] != 0) return false;
+	}
+	return true;
+}
+
+void SurfaceClass::Get_Pixel(Vector3& rgb, int x, int y, LockedSurfacePtr pBits, int pitch)
+{
+	// Format-agnostic on the caller side — operates on the pointer/pitch the
+	// caller has already locked. The DX8 branch uses the same Convert_Pixel
+	// helper; provide a minimal BGRA8 decode here since Convert_Pixel itself
+	// lives in the DX8-only part of this file.
+	const unsigned char* p = static_cast<const unsigned char*>(pBits) + y * pitch + x * 4;
+	if (SurfaceFormat == WW3D_FORMAT_A8R8G8B8 || SurfaceFormat == WW3D_FORMAT_X8R8G8B8) {
+		rgb.X = p[2] * (1.0f / 255.0f);
+		rgb.Y = p[1] * (1.0f / 255.0f);
+		rgb.Z = p[0] * (1.0f / 255.0f);
+	} else {
+		Surface_Warn_Once("Get_Pixel non-BGRA8 format");
+		rgb.X = rgb.Y = rgb.Z = 0.0f;
+	}
+}
+
+void SurfaceClass::Attach(IDirect3DSurface8* /*surface*/)
+{
+	// bgfx has no IDirect3DSurface8; nothing to reference.
+}
+
+void SurfaceClass::Detach()
+{
+	// Symmetric no-op with Attach.
+	D3DSurface = nullptr;
+}
+
+void SurfaceClass::Draw_Pixel(const unsigned int x, const unsigned int y, unsigned int color,
+	unsigned int bytesPerPixel, LockedSurfacePtr pBits, int pitch)
+{
+	unsigned char* dst = static_cast<unsigned char*>(pBits) + y * pitch + x * bytesPerPixel;
+	std::memcpy(dst, &color, bytesPerPixel);
+}
+
+void SurfaceClass::Draw_H_Line(const unsigned int y, const unsigned int x1, const unsigned int x2,
+	unsigned int color, unsigned int bytesPerPixel, LockedSurfacePtr pBits, int pitch)
+{
+	unsigned char* row = static_cast<unsigned char*>(pBits) + y * pitch;
+	for (unsigned int x = x1; x <= x2; ++x) {
+		std::memcpy(row + x * bytesPerPixel, &color, bytesPerPixel);
+	}
+}
+
+bool SurfaceClass::Is_Monochrome()
+{
+	// CPU scan for BGRA8 only; other formats conservatively report false.
+	if (SurfaceFormat != WW3D_FORMAT_A8R8G8B8 && SurfaceFormat != WW3D_FORMAT_X8R8G8B8) {
+		Surface_Warn_Once("Is_Monochrome non-BGRA8 format");
+		return false;
+	}
+	if (!CpuPixels) return true;
+	for (unsigned y = 0; y < CpuHeight; ++y) {
+		const unsigned char* row = CpuPixels + y * CpuPitch;
+		for (unsigned x = 0; x < CpuWidth; ++x) {
+			const unsigned char b = row[x*4 + 0];
+			const unsigned char g = row[x*4 + 1];
+			const unsigned char r = row[x*4 + 2];
+			if (r != g || g != b) return false;
+		}
+	}
+	return true;
+}
+
+void SurfaceClass::Hue_Shift(const Vector3& /*hsv_shift*/)
+{
+	// Requires the full Convert_Pixel/Recolor plumbing above — that code is
+	// DX8-branch-local today. No bgfx caller yet; defer until one exists.
+	Surface_Warn_Once("Hue_Shift");
+}
+
 #endif // RTS_RENDERER_DX8

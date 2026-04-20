@@ -1,14 +1,17 @@
 /*
 **	Phase 5h.3 smoke test: BgfxTextureCache path-keyed loader.
+**	Extended in Phase 5h.33 to cover refcount semantics.
 **
 **	Hand-builds a minimal 16×16 A8R8G8B8 DDS on disk (same header layout
 **	as tst_bgfx_bimg), then exercises the cache:
-**	  1. Get_Or_Load_File on the path returns a non-zero handle; Size()==1.
+**	  1. Get_Or_Load_File on the path returns a non-zero handle; Size()==1
+**	     and Ref_Count==1.
 **	  2. Second call for the same path returns the *identical* handle
-**	     (dedup worked, no re-upload).
-**	  3. Release drops the entry; Size()==0.
+**	     (dedup worked, no re-upload); Ref_Count==2.
+**	  3. Phase 5h.33 — Release decrements refcount; entry stays alive
+**	     while refcount > 0. Second Release drops to 0 and removes.
 **	  4. Get_Or_Load_File again brings it back; handle non-zero.
-**	  5. Clear_All sweeps the map; Size()==0.
+**	  5. Clear_All sweeps the map unconditionally; Size()==0.
 **	  6. Bad path returns 0 and doesn't insert anything.
 **
 **	Temp file is written to SDL's prefer-path if available, else /tmp.
@@ -27,6 +30,8 @@
 #include "BGFXDevice/Common/BgfxBootstrap.h"
 #include "BGFXDevice/Common/BgfxTextureCache.h"
 #include "SDLDevice/Common/SDLGlobals.h"
+#include "WW3D2/IRenderBackend.h"
+#include "WW3D2/RenderBackendRuntime.h"
 
 namespace
 {
@@ -130,28 +135,53 @@ int main(int /*argc*/, char* /*argv*/[])
 
 	bool ok = true;
 
-	// Invariant 1 — first load succeeds, cache tracks it.
+	// Invariant 1 — first load succeeds, cache tracks it, refcount==1.
 	const uintptr_t h1 = BgfxTextureCache::Get_Or_Load_File(tmp.c_str());
 	ok &= !FailIf(h1 == 0, "invariant 1: first Get_Or_Load_File returned 0");
 	ok &= !FailIf(BgfxTextureCache::Size() != 1, "invariant 1: Size() != 1 after first load");
+	ok &= !FailIf(BgfxTextureCache::Ref_Count(tmp.c_str()) != 1, "invariant 1: Ref_Count != 1 after first load");
 
-	// Invariant 2 — second lookup is deduplicated.
+	// Phase 5h.36 — our hand-built DDS has only mip level 0, so the backend
+	// should report `Texture_Mip_Count == 1`. This is the "no pre-baked mip
+	// chain" case that `TextureClass::Init` uses to demote `Filter`.
+	{
+		IRenderBackend* b = RenderBackendRuntime::Get_Active();
+		ok &= !FailIf(b == nullptr, "5h.36: no active backend");
+		if (b)
+		{
+			const uint8_t mips = b->Texture_Mip_Count(h1);
+			ok &= !FailIf(mips != 1, "5h.36: single-mip DDS reported mips != 1");
+		}
+	}
+
+	// Invariant 2 — second lookup is deduplicated and bumps refcount.
 	const uintptr_t h2 = BgfxTextureCache::Get_Or_Load_File(tmp.c_str());
 	ok &= !FailIf(h2 != h1, "invariant 2: second load returned a different handle");
 	ok &= !FailIf(BgfxTextureCache::Size() != 1, "invariant 2: Size() changed on repeat lookup");
+	ok &= !FailIf(BgfxTextureCache::Ref_Count(tmp.c_str()) != 2, "invariant 2: Ref_Count != 2 after second load");
 
-	// Invariant 3 — Release drops the entry.
+	// Invariant 3 — Release decrements but doesn't evict while refcount > 0.
 	BgfxTextureCache::Release(tmp.c_str());
-	ok &= !FailIf(BgfxTextureCache::Size() != 0, "invariant 3: Size() != 0 after Release");
+	ok &= !FailIf(BgfxTextureCache::Size() != 1, "invariant 3: Size() changed after first Release (refcount > 0)");
+	ok &= !FailIf(BgfxTextureCache::Ref_Count(tmp.c_str()) != 1, "invariant 3: Ref_Count != 1 after first Release");
+
+	// Invariant 3b — second Release takes refcount to 0; entry removed.
+	BgfxTextureCache::Release(tmp.c_str());
+	ok &= !FailIf(BgfxTextureCache::Size() != 0, "invariant 3b: Size() != 0 after last Release");
+	ok &= !FailIf(BgfxTextureCache::Ref_Count(tmp.c_str()) != 0, "invariant 3b: Ref_Count != 0 after entry removal");
 
 	// Invariant 4 — re-load after release still works.
 	const uintptr_t h3 = BgfxTextureCache::Get_Or_Load_File(tmp.c_str());
 	ok &= !FailIf(h3 == 0, "invariant 4: re-load returned 0");
 	ok &= !FailIf(BgfxTextureCache::Size() != 1, "invariant 4: Size() != 1 after re-load");
 
-	// Invariant 5 — Clear_All wipes everything.
+	// Invariant 5 — Clear_All wipes everything unconditionally (ignores refcount).
+	// Re-load twice to bump refcount, then Clear_All should still drop it.
+	(void)BgfxTextureCache::Get_Or_Load_File(tmp.c_str());
+	ok &= !FailIf(BgfxTextureCache::Ref_Count(tmp.c_str()) != 2, "invariant 5: refcount not bumped pre-Clear_All");
 	BgfxTextureCache::Clear_All();
 	ok &= !FailIf(BgfxTextureCache::Size() != 0, "invariant 5: Size() != 0 after Clear_All");
+	ok &= !FailIf(BgfxTextureCache::Ref_Count(tmp.c_str()) != 0, "invariant 5: Ref_Count != 0 after Clear_All");
 
 	// Invariant 6 — bad path returns 0, doesn't pollute.
 	const uintptr_t hBad = BgfxTextureCache::Get_Or_Load_File("/does/not/exist.dds");

@@ -39,25 +39,12 @@
 //#define INDEX_BUFFER_LOG
 
 #include "dx8indexbuffer.h"
-#ifdef RTS_RENDERER_DX8
 #include "dx8wrapper.h"
-#include "dx8caps.h"
-#include "sphere.h"
-#include "thread.h"
 #include "wwmemlog.h"
 
-#define DEFAULT_IB_SIZE 5000
-
-static bool _DynamicSortingIndexArrayInUse=false;
-static SortingIndexBufferClass* _DynamicSortingIndexArray;
-static unsigned short _DynamicSortingIndexArraySize=0;
-static unsigned short _DynamicSortingIndexArrayOffset=0;
-
-static bool _DynamicDX8IndexBufferInUse=false;
-static DX8IndexBufferClass* _DynamicDX8IndexBuffer=nullptr;
-static unsigned short _DynamicDX8IndexBufferSize=DEFAULT_IB_SIZE;
-static unsigned short _DynamicDX8IndexBufferOffset=0;
-
+// Phase 5h.13 — base-class accumulators shared by both DX8 and bgfx builds.
+// Symbols link in bgfx mode; constructor path is cold (no one constructs an
+// IB yet) but `IndexBufferClass*` references compile.
 static int _IndexBufferCount;
 static int _IndexBufferTotalIndices;
 static int _IndexBufferTotalSize;
@@ -192,11 +179,16 @@ IndexBufferClass::WriteLockClass::WriteLockClass(IndexBufferClass* index_buffer_
 	switch (index_buffer->Type()) {
 	case BUFFER_TYPE_DX8:
 		DX8_Assert();
-		DX8_ErrorCode(static_cast<DX8IndexBufferClass*>(index_buffer)->Get_DX8_Index_Buffer()->Lock(
+		{
+		auto* dxIB = static_cast<DX8IndexBufferClass*>(index_buffer);
+		DX8_ErrorCode(dxIB->Get_DX8_Index_Buffer()->Lock(
 			0,
 			index_buffer->Get_Index_Count()*sizeof(WORD),
 			(unsigned char**)&indices,
 			flags));
+		// Phase 5h.18 — shadow fallback.
+		if (indices == nullptr) indices = dxIB->Get_Cpu_Shadow();
+		}
 		break;
 	case BUFFER_TYPE_SORTING:
 		indices=static_cast<SortingIndexBufferClass*>(index_buffer)->index_buffer;
@@ -243,11 +235,19 @@ IndexBufferClass::AppendLockClass::AppendLockClass(IndexBufferClass* index_buffe
 	switch (index_buffer->Type()) {
 	case BUFFER_TYPE_DX8:
 		DX8_Assert();
-		DX8_ErrorCode(static_cast<DX8IndexBufferClass*>(index_buffer)->index_buffer->Lock(
+		{
+		auto* dxIB = static_cast<DX8IndexBufferClass*>(index_buffer);
+		DX8_ErrorCode(dxIB->index_buffer->Lock(
 			start_index*sizeof(unsigned short),
 			index_range*sizeof(unsigned short),
 			(unsigned char**)&indices,
 			0));
+		// Phase 5h.18 — shadow fallback with byte offset.
+		if (indices == nullptr) {
+			if (auto* shadow = dxIB->Get_Cpu_Shadow())
+				indices = shadow + start_index;
+		}
+		}
 		break;
 	case BUFFER_TYPE_SORTING:
 		indices=static_cast<SortingIndexBufferClass*>(index_buffer)->index_buffer+start_index;
@@ -276,6 +276,48 @@ IndexBufferClass::AppendLockClass::~AppendLockClass()
 	}
 	index_buffer->Release_Ref();
 }
+
+// ----------------------------------------------------------------------------
+// Phase 5h.14 — SortingIndexBufferClass is CPU-only and compiles in both
+// modes. Moved BEFORE DX8IndexBufferClass so the RTS_RENDERER_DX8 guard
+// that opens below it only wraps the DX8-API-bound code.
+// ----------------------------------------------------------------------------
+
+SortingIndexBufferClass::SortingIndexBufferClass(unsigned short index_count_)
+	:
+	IndexBufferClass(BUFFER_TYPE_SORTING,index_count_)
+{
+	WWMEMLOG(MEM_RENDERER);
+	WWASSERT(index_count);
+
+	index_buffer=W3DNEWARRAY unsigned short[index_count];
+}
+
+SortingIndexBufferClass::~SortingIndexBufferClass()
+{
+	delete[] index_buffer;
+}
+
+// Phase 5h.14/15 — `#include "dx8caps.h"` / `"sphere.h"` / `"thread.h"` moved
+// above the guard because DX8IndexBufferClass's methods (now unguarded)
+// reference them. Pool statics + DynamicIBAccessClass stay guarded (same
+// rationale as the VB file).
+#include "dx8caps.h"
+#include "sphere.h"
+#include "thread.h"
+
+// Phase 5h.16 — pool statics now available in both modes.
+#define DEFAULT_IB_SIZE 5000
+
+static bool _DynamicSortingIndexArrayInUse=false;
+static SortingIndexBufferClass* _DynamicSortingIndexArray;
+static unsigned short _DynamicSortingIndexArraySize=0;
+static unsigned short _DynamicSortingIndexArrayOffset=0;
+
+static bool _DynamicDX8IndexBufferInUse=false;
+static DX8IndexBufferClass* _DynamicDX8IndexBuffer=nullptr;
+static unsigned short _DynamicDX8IndexBufferSize=DEFAULT_IB_SIZE;
+static unsigned short _DynamicDX8IndexBufferOffset=0;
 
 // ----------------------------------------------------------------------------
 //
@@ -314,10 +356,14 @@ DX8IndexBufferClass::DX8IndexBufferClass(unsigned short index_count_,UsageType u
 	// Vertex buffer creation failed, so try releasing least used textures and flushing the mesh cache.
 
 	// Free all textures that haven't been used in the last 5 seconds
+	// Phase 5h.23 — Invalidate_Old_Unused_Textures is now linkable in bgfx mode;
+	// only the mesh-cache call stays guarded.
 	TextureClass::Invalidate_Old_Unused_Textures(5000);
 
+#ifdef RTS_RENDERER_DX8
 	// Invalidate the mesh cache
 	WW3D::_Invalidate_Mesh_Cache();
+#endif
 
 	// Try again...
 	ret=DX8Wrapper::_Get_D3D_Device8()->CreateIndexBuffer(
@@ -333,6 +379,10 @@ DX8IndexBufferClass::DX8IndexBufferClass(unsigned short index_count_,UsageType u
 
 	// If it still fails it is fatal
 	DX8_ErrorCode(ret);
+
+	// Phase 5h.18 — CPU shadow for bgfx-mode Lock fallback / Draw_Triangles
+	// extraction. Dead memory in DX8 mode.
+	m_cpuShadow = new unsigned short[index_count];
 }
 
 // ----------------------------------------------------------------------------
@@ -340,6 +390,9 @@ DX8IndexBufferClass::DX8IndexBufferClass(unsigned short index_count_,UsageType u
 DX8IndexBufferClass::~DX8IndexBufferClass()
 {
 	index_buffer->Release();
+	// Phase 5h.18
+	delete[] m_cpuShadow;
+	m_cpuShadow = nullptr;
 }
 
 // ----------------------------------------------------------------------------
@@ -348,29 +401,15 @@ DX8IndexBufferClass::~DX8IndexBufferClass()
 //
 // ----------------------------------------------------------------------------
 
-SortingIndexBufferClass::SortingIndexBufferClass(unsigned short index_count_)
-	:
-	IndexBufferClass(BUFFER_TYPE_SORTING,index_count_)
-{
-	WWMEMLOG(MEM_RENDERER);
-	WWASSERT(index_count);
-
-	index_buffer=W3DNEWARRAY unsigned short[index_count];
-}
-
-// ----------------------------------------------------------------------------
-
-SortingIndexBufferClass::~SortingIndexBufferClass()
-{
-	delete[] index_buffer;
-}
-
 // ----------------------------------------------------------------------------
 //
 //
 //
 // ----------------------------------------------------------------------------
 
+// Phase 5h.16 — DynamicIBAccessClass now compiles in both modes. All DX8 API
+// references resolve through the compat shim + un-guarded DX8IndexBufferClass
+// ctor from 5h.15.
 DynamicIBAccessClass::DynamicIBAccessClass(unsigned short type_, unsigned short index_count_)
 	:
 	IndexCount(index_count_),
@@ -540,4 +579,3 @@ unsigned short DynamicIBAccessClass::Get_Default_Index_Count()
 {
 	return _DynamicDX8IndexBufferSize;
 }
-#endif // RTS_RENDERER_DX8

@@ -39,6 +39,19 @@
  * - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
 #include "textureloader.h"
+
+// Phase 5h.22/25 — bgfx-mode no-op stubs for TextureLoader request methods.
+// Called by TextureBaseClass::Load_Locked_Surface (5h.22) and TextureClass::Init
+// (5h.25); in bgfx mode nothing actually loads textures through this loader,
+// the BgfxTextureCache handles uploads directly from Init. Stubs just satisfy
+// the symbol references.
+#ifndef RTS_RENDERER_DX8
+void TextureLoader::Request_Thumbnail(TextureBaseClass* /*tc*/) {}
+void TextureLoader::Request_Foreground_Loading(TextureBaseClass* /*tc*/) {}
+void TextureLoader::Request_Background_Loading(TextureBaseClass* /*tc*/) {}
+bool TextureLoader::Is_DX8_Thread() { return false; }
+#endif
+
 #ifdef RTS_RENDERER_DX8
 #include "mutex.h"
 #include "thread.h"

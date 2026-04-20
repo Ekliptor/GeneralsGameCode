@@ -25,11 +25,19 @@ namespace BgfxTextureCache
 
 namespace
 {
-	std::unordered_map<std::string, uintptr_t>& Entries()
+	// Phase 5h.33 — entries track both the bgfx handle and a refcount.
+	// Get_Or_Load_File bumps refCount; Release decrements; handle is
+	// destroyed + entry erased when refCount drops to zero.
+	struct Entry {
+		uintptr_t handle;
+		unsigned  refCount;
+	};
+
+	std::unordered_map<std::string, Entry>& Entries()
 	{
 		// Inline function-local static: single instance across TUs, no
 		// static-init-order headaches.
-		static std::unordered_map<std::string, uintptr_t> s_map;
+		static std::unordered_map<std::string, Entry> s_map;
 		return s_map;
 	}
 
@@ -56,7 +64,10 @@ uintptr_t Get_Or_Load_File(const char* path)
 	auto& map = Entries();
 	auto it = map.find(path);
 	if (it != map.end())
-		return it->second;
+	{
+		++it->second.refCount;
+		return it->second.handle;
+	}
 
 	IRenderBackend* backend = RenderBackendRuntime::Get_Active();
 	if (backend == nullptr)
@@ -77,7 +88,7 @@ uintptr_t Get_Or_Load_File(const char* path)
 		return 0;
 	}
 
-	map.emplace(path, handle);
+	map.emplace(path, Entry{handle, 1u});
 	return handle;
 }
 
@@ -88,13 +99,19 @@ void Release(const char* path)
 	auto it = map.find(path);
 	if (it == map.end()) return;
 
-	IRenderBackend* backend = RenderBackendRuntime::Get_Active();
-	if (backend != nullptr)
-		backend->Destroy_Texture(it->second);
-	// If the backend has already shut down, the texture was already
-	// destroyed by DestroyPipelineResources' sweep — we just drop the map
-	// entry.
-	map.erase(it);
+	if (it->second.refCount > 0)
+		--it->second.refCount;
+
+	if (it->second.refCount == 0)
+	{
+		IRenderBackend* backend = RenderBackendRuntime::Get_Active();
+		if (backend != nullptr)
+			backend->Destroy_Texture(it->second.handle);
+		// If the backend has already shut down, the texture was already
+		// destroyed by DestroyPipelineResources' sweep — we just drop the
+		// map entry.
+		map.erase(it);
+	}
 }
 
 void Clear_All()
@@ -104,7 +121,7 @@ void Clear_All()
 	if (backend != nullptr)
 	{
 		for (const auto& kv : map)
-			backend->Destroy_Texture(kv.second);
+			backend->Destroy_Texture(kv.second.handle);
 	}
 	map.clear();
 }
@@ -112,6 +129,14 @@ void Clear_All()
 std::size_t Size()
 {
 	return Entries().size();
+}
+
+unsigned Ref_Count(const char* path)
+{
+	if (path == nullptr) return 0;
+	auto& map = Entries();
+	auto it = map.find(path);
+	return (it == map.end()) ? 0u : it->second.refCount;
 }
 
 } // namespace BgfxTextureCache

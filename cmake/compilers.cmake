@@ -49,8 +49,21 @@ if (NOT IS_VS6_BUILD)
         add_compile_options(/MP)
         # Enforce strict __cplusplus version
         add_compile_options(/Zc:__cplusplus)
+        if(RTS_ENABLE_64BIT_WARNINGS)
+            # Phase 6d — /W3 already surfaces C4267 (size_t→int) and C4244
+            # (int64→int). Escalate them to errors on opt-in to surface the
+            # 64-bit audit list.
+            add_compile_options(/we4267 /we4244 /we4311 /we4312)
+        endif()
     else()
         add_compile_options(-Wsuggest-override)
+        if(RTS_ENABLE_64BIT_WARNINGS)
+            # Phase 6d — Clang's `-Wshorten-64-to-32` surfaces exactly the
+            # `int64→int` narrowings that would bite on a 64-bit Windows
+            # build. Very noisy in legacy DX8/Miles/Bink code; off by default.
+            # See docs/Phase6d-64BitAudit.md.
+            add_compile_options(-Wshorten-64-to-32 -Wint-to-pointer-cast -Wpointer-to-int-cast)
+        endif()
     endif()
 else()
     if(RTS_BUILD_OPTION_VC6_FULL_DEBUG)

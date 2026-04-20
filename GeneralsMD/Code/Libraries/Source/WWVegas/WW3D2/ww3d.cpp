@@ -82,6 +82,38 @@
 
 
 #include "ww3d.h"
+
+// Phase 5h.20 — POD statics moved above the RTS_RENDERER_DX8 guard so they
+// link in bgfx mode. The inline accessors in ww3d.h (Get_Sync_Time,
+// Get_Thumbnail_Enabled, etc.) are called by TextureBaseClass methods that
+// are being un-guarded incrementally. Zero-initialized; the full WW3D
+// machinery that *writes* these values stays inside the guard, so in bgfx
+// mode they simply never change from their defaults — benign.
+unsigned int    WW3D::SyncTime          = 0;
+unsigned int    WW3D::PreviousSyncTime  = 0;
+bool            WW3D::IsInitted         = false;
+bool            WW3D::IsRendering       = false;
+int             WW3D::FrameCount        = 0;
+bool            WW3D::ThumbnailEnabled  = true;
+
+// Phase 5h.24 — file-local statics + getters needed by TextureBaseClass::
+// Get_Reduction. `_TextureReduction` starts at 0 (no reduction);
+// `_LargeTextureExtraReductionEnabled` starts false. In bgfx mode nothing
+// sets them (no WW3D::Init), so textures render at full resolution — the
+// desired default anyway.
+static int  _TextureReduction                 = 0;
+static bool _LargeTextureExtraReductionEnabled = false;
+
+int WW3D::Get_Texture_Reduction()
+{
+    return _TextureReduction;
+}
+
+bool WW3D::Is_Large_Texture_Extra_Reduction_Enabled()
+{
+    return _LargeTextureExtraReductionEnabled;
+}
+
 #ifdef RTS_RENDERER_DX8
 #include "rinfo.h"
 #include "assetmgr.h"
@@ -164,16 +196,14 @@ const char* DAZZLE_INI_FILENAME="DAZZLE.INI";
 
 float														WW3D::LogicFrameTimeMs = 1000.0f / WWSyncPerSecond; // initialized to something to avoid division by zero on first use
 float															WW3D::FractionalSyncMs = 0.0f;
-unsigned int											WW3D::SyncTime = 0;
-unsigned int											WW3D::PreviousSyncTime = 0;
+// Phase 5h.20 — SyncTime / PreviousSyncTime moved above the guard.
 bool														WW3D::IsSortingEnabled = true;
 
 float														WW3D::PixelCenterX = 0.0f;
 float														WW3D::PixelCenterY = 0.0f;
 
 
-bool														WW3D::IsInitted = false;
-bool														WW3D::IsRendering = false;
+// Phase 5h.20 — IsInitted / IsRendering moved above the guard.
 bool														WW3D::IsCapturing = false;
 bool														WW3D::IsScreenUVBiased = false;
 
@@ -189,7 +219,7 @@ FrameGrabClass *										WW3D::Movie = nullptr;
 bool														WW3D::PauseRecord;
 bool														WW3D::RecordNextFrame;
 
-int														WW3D::FrameCount = 0;
+// Phase 5h.20 — FrameCount moved above the guard.
 long														WW3D::UserStat0 = 0;
 long														WW3D::UserStat1 = 0;
 long														WW3D::UserStat2 = 0;
@@ -208,7 +238,7 @@ WW3D::PrelitModeEnum									WW3D::PrelitMode = PRELIT_MODE_LIGHTMAP_MULTI_PASS;
 bool														WW3D::ExposePrelit = false;
 
 bool														WW3D::SnapshotActivated=false;
-bool														WW3D::ThumbnailEnabled=true;
+// Phase 5h.20 — ThumbnailEnabled moved above the guard.
 
 WW3D::MeshDrawModeEnum								WW3D::MeshDrawMode = MESH_DRAW_MODE_OLD;
 WW3D::NPatchesGapFillingModeEnum					WW3D::NPatchesGapFillingMode = NPATCHES_GAP_FILLING_ENABLED;
@@ -217,9 +247,9 @@ bool														WW3D::IsTexturingEnabled=true;
 bool										WW3D::IsColoringEnabled=false;
 
 static HWND												_Hwnd = nullptr;		// Not a member to hide windows from WW3D users
-static int												_TextureReduction = 0;
+// Phase 5h.24 — _TextureReduction moved above the guard.
 static int												_TextureMinDim = 1;
-static bool												_LargeTextureExtraReductionEnabled = false;
+// Phase 5h.24 — _LargeTextureExtraReductionEnabled moved above the guard.
 int														WW3D::LastFrameMemoryAllocations;
 int														WW3D::LastFrameMemoryFrees;
 
@@ -1828,10 +1858,7 @@ void WW3D::Enable_Coloring(unsigned int color)
  * HISTORY:                                                                                    *
  *   11/25/99    TSS : Created.                                                                 *
  *=============================================================================================*/
-int	WW3D::Get_Texture_Reduction()
-{
-	return _TextureReduction;
-}
+// Phase 5h.24 — WW3D::Get_Texture_Reduction moved above the guard.
 
 /***********************************************************************************************
  * WW3D::Get_Texture_Min_Mip_Levels -- gets the minimum number of mip levels permitted		   *
@@ -1858,10 +1885,7 @@ void WW3D::Enable_Large_Texture_Extra_Reduction(bool onoff)
 	}
 }
 
-bool WW3D::Is_Large_Texture_Extra_Reduction_Enabled()
-{
-	return _LargeTextureExtraReductionEnabled;
-}
+// Phase 5h.24 — WW3D::Is_Large_Texture_Extra_Reduction_Enabled moved above the guard.
 
 /***********************************************************************************************
  * WW3D::Peek_Default_Debug_Material -- returns a pointer to the default debug mtl				  *

@@ -219,6 +219,16 @@ public:
 
 	IDirect3DVertexBuffer8* Get_DX8_Vertex_Buffer() { return VertexBuffer; }
 
+	// Phase 5h.18 — CPU-side shadow buffer. Allocated in the ctor, sized
+	// `FVF_Info().Get_FVF_Size() * VertexCount`. In DX8 mode it's dead
+	// memory — `VertexBuffer->Lock()` returns real GPU-mapped memory so
+	// the Lock class's fallback branch never reads it. In bgfx mode the
+	// compat-shim Lock returns null, the fallback kicks in, and the shadow
+	// is what subsequent Copy methods write to and Draw_Triangles reads
+	// from. 8-byte member cost in DX8 mode (an always-null pointer we could
+	// elide, but the simplicity of a single code path wins).
+	unsigned char* Get_Cpu_Shadow() { return m_cpuShadow; }
+
 	void Copy(const Vector3* loc, unsigned first_vertex, unsigned count);
 	void Copy(const Vector3* loc, const Vector2* uv, unsigned first_vertex, unsigned count);
 	void Copy(const Vector3* loc, const Vector3* norm, unsigned first_vertex, unsigned count);
@@ -228,6 +238,7 @@ public:
 
 protected:
 	IDirect3DVertexBuffer8*		VertexBuffer;
+	unsigned char*				m_cpuShadow = nullptr;   // Phase 5h.18
 
 	void Create_Vertex_Buffer(UsageType usage);
 };

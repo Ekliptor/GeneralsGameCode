@@ -402,6 +402,10 @@ void BgfxBackend::InitPipelineResources()
 	m_uSampler1      = bgfx::createUniform("s_texture1",      bgfx::UniformType::Sampler);
 	m_uLightDirArr   = bgfx::createUniform("u_lightDirArr",   bgfx::UniformType::Vec4, kMaxLights);
 	m_uLightColorArr = bgfx::createUniform("u_lightColorArr", bgfx::UniformType::Vec4, kMaxLights);
+	m_uLightPosArr   = bgfx::createUniform("u_lightPosArr",   bgfx::UniformType::Vec4, kMaxLights);
+	m_uLightSpotArr  = bgfx::createUniform("u_lightSpotArr",  bgfx::UniformType::Vec4, kMaxLights);
+	m_uLightSpecArr  = bgfx::createUniform("u_lightSpecArr",  bgfx::UniformType::Vec4, kMaxLights);
+	m_uMaterialSpec  = bgfx::createUniform("u_materialSpec",  bgfx::UniformType::Vec4);
 	m_uCutoutRef     = bgfx::createUniform("u_cutoutRef",     bgfx::UniformType::Vec4);
 	m_uFogColor      = bgfx::createUniform("u_fogColor",      bgfx::UniformType::Vec4);
 	m_uFogRange      = bgfx::createUniform("u_fogRange",      bgfx::UniformType::Vec4);
@@ -454,6 +458,7 @@ void BgfxBackend::DestroyPipelineResources()
 		}
 	}
 	m_ownedTextures.clear();
+	m_textureMipCounts.clear();
 	for (unsigned i = 0; i < kMaxTextureStages; ++i)
 		m_stageTexture[i] = 0;
 
@@ -469,6 +474,10 @@ void BgfxBackend::DestroyPipelineResources()
 	if (bgfx::isValid(m_uSampler1))          bgfx::destroy(m_uSampler1);
 	if (bgfx::isValid(m_uLightDirArr))       bgfx::destroy(m_uLightDirArr);
 	if (bgfx::isValid(m_uLightColorArr))     bgfx::destroy(m_uLightColorArr);
+	if (bgfx::isValid(m_uLightPosArr))       bgfx::destroy(m_uLightPosArr);
+	if (bgfx::isValid(m_uLightSpotArr))      bgfx::destroy(m_uLightSpotArr);
+	if (bgfx::isValid(m_uLightSpecArr))      bgfx::destroy(m_uLightSpecArr);
+	if (bgfx::isValid(m_uMaterialSpec))      bgfx::destroy(m_uMaterialSpec);
 	if (bgfx::isValid(m_uCutoutRef))          bgfx::destroy(m_uCutoutRef);
 	if (bgfx::isValid(m_uFogColor))           bgfx::destroy(m_uFogColor);
 	if (bgfx::isValid(m_uFogRange))           bgfx::destroy(m_uFogRange);
@@ -477,7 +486,8 @@ void BgfxBackend::DestroyPipelineResources()
 	if (bgfx::isValid(m_currentIB))          bgfx::destroy(m_currentIB);
 	m_progSolid = m_progVColor = m_progTex = m_progTexMLit = m_progTex2 = BGFX_INVALID_HANDLE;
 	m_uSolidColor = m_uSampler = m_uSampler1 = BGFX_INVALID_HANDLE;
-	m_uLightDirArr = m_uLightColorArr = m_uCutoutRef = BGFX_INVALID_HANDLE;
+	m_uLightDirArr = m_uLightColorArr = m_uLightPosArr = m_uLightSpotArr = BGFX_INVALID_HANDLE;
+	m_uLightSpecArr = m_uMaterialSpec = m_uCutoutRef = BGFX_INVALID_HANDLE;
 	m_uFogColor = m_uFogRange = BGFX_INVALID_HANDLE;
 	m_placeholderTexture = BGFX_INVALID_HANDLE;
 	m_currentVB = BGFX_INVALID_HANDLE;
@@ -531,11 +541,10 @@ uintptr_t BgfxBackend::Create_Texture_RGBA8(const void* pixels,
                                             uint16_t height,
                                             bool mipmap)
 {
-	if (!m_initialized || pixels == nullptr || width == 0 || height == 0)
+	if (!m_initialized || width == 0 || height == 0)
 		return 0;
 	InitPipelineResources();
 
-	const uint32_t byteSize = uint32_t(width) * uint32_t(height) * 4u;
 	uint64_t flags = BGFX_SAMPLER_U_CLAMP | BGFX_SAMPLER_V_CLAMP;
 	// Point-sample without mips; trilinear with mips for a more game-like look.
 	if (!mipmap)
@@ -544,16 +553,68 @@ uintptr_t BgfxBackend::Create_Texture_RGBA8(const void* pixels,
 	}
 
 	const bool hasMips = mipmap;
+
+	// Phase 5h.28 — accept `pixels == nullptr` for procedural textures. Callers
+	// that build their own content (render targets sampled back, CPU-driven
+	// paint buffers) allocate an empty texture here and populate it later via
+	// a future Update_Texture path. bgfx::createTexture2D with NULL memory
+	// yields an uninitialized texture — contents are driver-dependent until
+	// the first write, so never sample without filling.
+	const bgfx::Memory* mem = nullptr;
+	if (pixels != nullptr)
+	{
+		const uint32_t byteSize = uint32_t(width) * uint32_t(height) * 4u;
+		mem = bgfx::copy(pixels, byteSize);
+	}
+
 	bgfx::TextureHandle handle = bgfx::createTexture2D(
-		width, height, hasMips, 1, bgfx::TextureFormat::RGBA8,
-		flags, bgfx::copy(pixels, byteSize));
+		width, height, hasMips, 1, bgfx::TextureFormat::RGBA8, flags, mem);
 
 	if (!bgfx::isValid(handle))
 		return 0;
 
 	auto* owned = new bgfx::TextureHandle(handle);
 	m_ownedTextures.push_back(owned);
-	return reinterpret_cast<uintptr_t>(owned);
+	const uintptr_t result = reinterpret_cast<uintptr_t>(owned);
+
+	// Phase 5h.36 — record mip count. `mipmap==true` lets bgfx generate a full
+	// chain down to 1x1; we don't know the exact level count without a log2
+	// of max(w,h), so compute it. `mipmap==false` → 1 level.
+	uint8_t mips = 1;
+	if (mipmap)
+	{
+		uint16_t m = width > height ? width : height;
+		while (m > 1) { m >>= 1; ++mips; }
+	}
+	m_textureMipCounts[result] = mips;
+
+	return result;
+}
+
+void BgfxBackend::Update_Texture_RGBA8(uintptr_t handle,
+                                        const void* pixels,
+                                        uint16_t width,
+                                        uint16_t height)
+{
+	// Phase 5h.30 — upload `width * height * 4` bytes to the texture at mip 0.
+	// Handle 0 or null pixels is a silent no-op (callers may hold
+	// unallocated handles). bgfx::updateTexture2D copies the data before
+	// returning; callers can free their buffer immediately.
+	if (!m_initialized || handle == 0 || pixels == nullptr || width == 0 || height == 0)
+		return;
+
+	auto* owned = reinterpret_cast<bgfx::TextureHandle*>(handle);
+	if (!bgfx::isValid(*owned))
+		return;
+
+	const uint32_t byteSize = uint32_t(width) * uint32_t(height) * 4u;
+	bgfx::updateTexture2D(
+		*owned,
+		/*layer=*/0,
+		/*mip=*/0,
+		/*x=*/0, /*y=*/0,
+		width, height,
+		bgfx::copy(pixels, byteSize));
 }
 
 uintptr_t BgfxBackend::Create_Texture_From_Memory(const void* data, uint32_t size)
@@ -605,7 +666,12 @@ uintptr_t BgfxBackend::Create_Texture_From_Memory(const void* data, uint32_t siz
 
 	auto* owned = new bgfx::TextureHandle(handle);
 	m_ownedTextures.push_back(owned);
-	return reinterpret_cast<uintptr_t>(owned);
+	const uintptr_t result = reinterpret_cast<uintptr_t>(owned);
+
+	// Phase 5h.36 — bimg tells us the pre-baked mip count (>=1).
+	m_textureMipCounts[result] = static_cast<uint8_t>(image->m_numMips);
+
+	return result;
 }
 
 void BgfxBackend::Destroy_Texture(uintptr_t handle)
@@ -628,6 +694,15 @@ void BgfxBackend::Destroy_Texture(uintptr_t handle)
 	for (unsigned i = 0; i < kMaxTextureStages; ++i)
 		if (m_stageTexture[i] == handle)
 			m_stageTexture[i] = 0;
+
+	// Phase 5h.36 — drop any mip-count bookkeeping.
+	m_textureMipCounts.erase(handle);
+}
+
+uint8_t BgfxBackend::Texture_Mip_Count(uintptr_t handle)
+{
+	auto it = m_textureMipCounts.find(handle);
+	return (it == m_textureMipCounts.end()) ? uint8_t(0) : it->second;
 }
 
 void BgfxBackend::Set_Texture(unsigned stage, uintptr_t handle)
@@ -635,6 +710,59 @@ void BgfxBackend::Set_Texture(unsigned stage, uintptr_t handle)
 	if (stage >= kMaxTextureStages)
 		return;
 	m_stageTexture[stage] = handle;
+}
+
+// --- Phase 5h.34 sampler-state routing ---------------------------------------
+
+namespace {
+
+// Map `SamplerStateDesc` → bgfx sampler flag mask. Returning 0 means "use
+// defaults" (bilinear + wrap + trilinear-if-mips), which matches the flags
+// baked into the bgfx programs pre-5h.34.
+uint32_t SamplerFlags(const SamplerStateDesc& s)
+{
+	uint32_t flags = 0;
+
+	// Min filter: BGFX default is linear (flag 0). Only emit flags when we
+	// need point or anisotropic.
+	switch (s.minFilter)
+	{
+	case SamplerStateDesc::FILTER_POINT:        flags |= BGFX_SAMPLER_MIN_POINT; break;
+	case SamplerStateDesc::FILTER_ANISOTROPIC:  flags |= BGFX_SAMPLER_MIN_ANISOTROPIC; break;
+	case SamplerStateDesc::FILTER_LINEAR:       /* default */ break;
+	}
+	switch (s.magFilter)
+	{
+	case SamplerStateDesc::FILTER_POINT:        flags |= BGFX_SAMPLER_MAG_POINT; break;
+	case SamplerStateDesc::FILTER_ANISOTROPIC:  flags |= BGFX_SAMPLER_MAG_ANISOTROPIC; break;
+	case SamplerStateDesc::FILTER_LINEAR:       /* default */ break;
+	}
+
+	// Mip filter: if there are no mips the texture was created with 0 levels
+	// past mip 0, and bgfx must not try to sample linearly between them — force
+	// MIP_POINT. When mips exist, LINEAR is the bgfx default (no flag needed).
+	if (!s.hasMips || s.mipFilter == SamplerStateDesc::FILTER_POINT)
+		flags |= BGFX_SAMPLER_MIP_POINT;
+
+	// Address modes. BGFX default is repeat/wrap (flag 0).
+	if (s.addressU == SamplerStateDesc::ADDRESS_CLAMP) flags |= BGFX_SAMPLER_U_CLAMP;
+	if (s.addressV == SamplerStateDesc::ADDRESS_CLAMP) flags |= BGFX_SAMPLER_V_CLAMP;
+
+	// Anisotropy is controlled by the filter mode bits above — bgfx doesn't
+	// expose an explicit max-aniso sampler flag (it's a backend-level setting
+	// applied globally via bgfx::Init anisotropy caps). `maxAnisotropy` is
+	// stored for future per-sampler backends but currently unused here.
+
+	return flags;
+}
+
+} // namespace
+
+void BgfxBackend::Set_Sampler_State(unsigned stage, const SamplerStateDesc& sampler)
+{
+	if (stage >= kMaxTextureStages)
+		return;
+	m_stageSamplerFlags[stage] = SamplerFlags(sampler);
 }
 
 // --- Phase 5p render-target management ---------------------------------------
@@ -837,6 +965,43 @@ void BgfxBackend::Set_Index_Buffer(const uint16_t* data, unsigned indexCount)
 	m_currentIB = bgfx::createIndexBuffer(bgfx::copy(data, indexCount * sizeof(uint16_t)));
 }
 
+void BgfxBackend::Set_Viewport(int16_t x, int16_t y, uint16_t width, uint16_t height)
+{
+	// Phase 5h.6 — bgfx tracks a viewport per view, so the draw lands on
+	// whichever RT `m_currentView` currently points at. Passing `0×0` resets
+	// to the full current target so the game can drop back to the backbuffer
+	// viewport without the backend re-caching dimensions itself.
+	if (!m_initialized)
+		return;
+
+	if (width == 0 || height == 0)
+	{
+		uint16_t w = static_cast<uint16_t>(m_width);
+		uint16_t h = static_cast<uint16_t>(m_height);
+		if (m_currentView != 0)
+		{
+			for (auto* rt : m_renderTargets)
+			{
+				if (rt && rt->viewId == m_currentView)
+				{
+					w = rt->width;
+					h = rt->height;
+					break;
+				}
+			}
+		}
+		bgfx::setViewRect(m_currentView, 0, 0, w, h);
+		return;
+	}
+
+	// bgfx's setViewRect takes origin in pixels from top-left and unsigned
+	// extents. Negative `x`/`y` aren't supported — clamp to 0 and shrink the
+	// visible extent so the clipped rect still lands inside the target.
+	uint16_t ox = (x < 0) ? static_cast<uint16_t>(0) : static_cast<uint16_t>(x);
+	uint16_t oy = (y < 0) ? static_cast<uint16_t>(0) : static_cast<uint16_t>(y);
+	bgfx::setViewRect(m_currentView, ox, oy, width, height);
+}
+
 static bgfx::ProgramHandle SelectProgram(uint32_t attrMask,
                                          const ShaderStateDesc& shader,
                                          const MaterialDesc& material,
@@ -905,6 +1070,9 @@ bgfx::ProgramHandle BgfxBackend::ApplyDrawState(uint32_t attrMask)
 	{
 		float dirs[kMaxLights * 4];
 		float colors[kMaxLights * 4];
+		float positions[kMaxLights * 4];
+		float spots[kMaxLights * 4];
+		float specs[kMaxLights * 4];
 		const float globalAmbient = m_lightEnabled[0] ? m_lights[0].ambient : 0.0f;
 		for (unsigned i = 0; i < kMaxLights; ++i)
 		{
@@ -914,19 +1082,60 @@ bgfx::ProgramHandle BgfxBackend::ApplyDrawState(uint32_t attrMask)
 				dirs[i*4+1] = m_lights[i].direction[1];
 				dirs[i*4+2] = m_lights[i].direction[2];
 				dirs[i*4+3] = globalAmbient;
+				// Phase 5h.10 — pack spot inner cos into the previously unused
+				// color.w channel; the shader only reads it when the slot's
+				// spot outer cos >= 0.
 				colors[i*4+0] = m_lights[i].color[0] * m_lights[i].intensity;
 				colors[i*4+1] = m_lights[i].color[1] * m_lights[i].intensity;
 				colors[i*4+2] = m_lights[i].color[2] * m_lights[i].intensity;
-				colors[i*4+3] = 0.0f;
+				colors[i*4+3] = m_lights[i].spotInnerCos;
+				// Phase 5h.9 — point/spot lights carry world-space position +
+				// positive attenuation range in .w; directional slots upload
+				// .w = 0 (branchless `step(0.0001, .w)` selects directional).
+				const bool isPointOrSpot = (m_lights[i].type != LightDesc::LIGHT_DIRECTIONAL);
+				positions[i*4+0] = m_lights[i].position[0];
+				positions[i*4+1] = m_lights[i].position[1];
+				positions[i*4+2] = m_lights[i].position[2];
+				positions[i*4+3] = isPointOrSpot ? m_lights[i].attenuationRange : 0.0f;
+				// Phase 5h.10 — spot direction + outer cos. `outerCos < 0`
+				// flags the slot as "not a spot"; directional and point
+				// lights upload -1 so the shader's cone mask collapses to 1.
+				const bool isSpot = (m_lights[i].type == LightDesc::LIGHT_SPOT);
+				spots[i*4+0] = m_lights[i].spotDirection[0];
+				spots[i*4+1] = m_lights[i].spotDirection[1];
+				spots[i*4+2] = m_lights[i].spotDirection[2];
+				spots[i*4+3] = isSpot ? m_lights[i].spotOuterCos : -1.0f;
+				// Phase 5h.11 — per-light specular color. Zero-fill disables
+				// the specular contribution from this slot without a branch.
+				specs[i*4+0] = m_lights[i].specular[0] * m_lights[i].intensity;
+				specs[i*4+1] = m_lights[i].specular[1] * m_lights[i].intensity;
+				specs[i*4+2] = m_lights[i].specular[2] * m_lights[i].intensity;
+				specs[i*4+3] = 0.0f;
 			}
 			else
 			{
 				dirs[i*4+0] = 0.0f; dirs[i*4+1] = -1.0f; dirs[i*4+2] = 0.0f; dirs[i*4+3] = globalAmbient;
 				colors[i*4+0] = 0.0f; colors[i*4+1] = 0.0f; colors[i*4+2] = 0.0f; colors[i*4+3] = 0.0f;
+				positions[i*4+0] = 0.0f; positions[i*4+1] = 0.0f; positions[i*4+2] = 0.0f; positions[i*4+3] = 0.0f;
+				spots[i*4+0] = 0.0f; spots[i*4+1] = 0.0f; spots[i*4+2] = 1.0f; spots[i*4+3] = -1.0f;
+				specs[i*4+0] = 0.0f; specs[i*4+1] = 0.0f; specs[i*4+2] = 0.0f; specs[i*4+3] = 0.0f;
 			}
 		}
-		bgfx::setUniform(m_uLightDirArr,   dirs,   kMaxLights);
-		bgfx::setUniform(m_uLightColorArr, colors, kMaxLights);
+		bgfx::setUniform(m_uLightDirArr,   dirs,      kMaxLights);
+		bgfx::setUniform(m_uLightColorArr, colors,    kMaxLights);
+		bgfx::setUniform(m_uLightPosArr,   positions, kMaxLights);
+		bgfx::setUniform(m_uLightSpotArr,  spots,     kMaxLights);
+		bgfx::setUniform(m_uLightSpecArr,  specs,     kMaxLights);
+
+		// Material specular (rgb + shininess). Uploaded whenever mlit is
+		// selected so a 0-color descriptor still zeros last-frame state.
+		const float matSpec[4] = {
+			m_material.specularColor[0],
+			m_material.specularColor[1],
+			m_material.specularColor[2],
+			m_material.specularPower
+		};
+		bgfx::setUniform(m_uMaterialSpec, matSpec);
 	}
 
 	// Phase 5n — cutout threshold. Only the three textured programs
@@ -965,6 +1174,9 @@ bgfx::ProgramHandle BgfxBackend::ApplyDrawState(uint32_t attrMask)
 
 	// Bind stage 0 — fall back to the built-in 2×2 white placeholder when
 	// nothing is bound so programs that sample never read garbage.
+	// Phase 5h.34: per-stage sampler flags from Set_Sampler_State override the
+	// program-bake defaults. `UINT32_MAX` tells bgfx "use the sampler state
+	// encoded at program-build time".
 	{
 		bgfx::TextureHandle bound = m_placeholderTexture;
 		if (m_stageTexture[0] != 0)
@@ -973,7 +1185,8 @@ bgfx::ProgramHandle BgfxBackend::ApplyDrawState(uint32_t attrMask)
 			if (bgfx::isValid(*owned))
 				bound = *owned;
 		}
-		bgfx::setTexture(0, m_uSampler, bound);
+		const uint32_t flags0 = m_stageSamplerFlags[0] ? m_stageSamplerFlags[0] : UINT32_MAX;
+		bgfx::setTexture(0, m_uSampler, bound, flags0);
 	}
 
 	// Phase 5k — only the tex2 program declares s_texture1. bgfx validates
@@ -983,7 +1196,10 @@ bgfx::ProgramHandle BgfxBackend::ApplyDrawState(uint32_t attrMask)
 	{
 		auto* owned = reinterpret_cast<bgfx::TextureHandle*>(m_stageTexture[1]);
 		if (bgfx::isValid(*owned))
-			bgfx::setTexture(1, m_uSampler1, *owned);
+		{
+			const uint32_t flags1 = m_stageSamplerFlags[1] ? m_stageSamplerFlags[1] : UINT32_MAX;
+			bgfx::setTexture(1, m_uSampler1, *owned, flags1);
+		}
 	}
 
 	bgfx::setState(BuildStateMask(m_shader));

@@ -40,37 +40,27 @@
  * - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
 #include "texture.h"
-#ifdef RTS_RENDERER_DX8
-
-#include <d3d8.h>
-#include <d3dx8core.h>
-#include "dx8wrapper.h"
-#include "TARGA.h"
-#include <nstrdup.h>
-#include "w3d_file.h"
-#include "assetmgr.h"
-#include "formconv.h"
-#include "textureloader.h"
-#include "missingtexture.h"
-#include "ffactory.h"
-#include "dx8caps.h"
 #include "dx8texman.h"
-#include "meshmatdesc.h"
-#include "texturethumbnail.h"
-#include "wwprofile.h"
 
-const unsigned DEFAULT_INACTIVATION_TIME=20000;
+// Phase 5h.29 — IRenderBackend / RenderBackendRuntime needed here for the
+// bgfx RT cleanup in the base-class dtor (below). Also re-included in the
+// inner #ifndef RTS_RENDERER_DX8 block for TextureClass::Init / Apply.
+// Phase 5h.33 — BgfxTextureCache::Release needed for the dtor's cache-
+// owned branch (refcount decrement when a TextureClass goes away).
+#ifndef RTS_RENDERER_DX8
+#include "WW3D2/RenderBackendRuntime.h"
+#include "WW3D2/IRenderBackend.h"
+#include "BGFXDevice/Common/BgfxTextureCache.h"
+#endif
 
-/*
-** Definitions of static members:
-*/
-
+// Phase 5h.19 — base-class ctor + dtor shared by both DX8 and bgfx builds.
+// In bgfx mode the ctor path is cold (no TextureClass subclass is
+// constructed yet — they stay inside the guard), but the symbols must
+// link for derived-class ctors to eventually call up the inheritance
+// chain. Deps: `D3DTexture->Release()` resolves to the compat-shim
+// AddRef/Release stub; `DX8TextureManagerClass::Remove` compiles in
+// both modes (dx8texman.cpp has no RTS_RENDERER_DX8 guard).
 static unsigned unused_texture_id;
-
-// This throttles submissions to the background texture loading queue.
-static unsigned TexturesAppliedPerFrame;
-const unsigned MAX_TEXTURES_APPLIED_PER_FRAME=2;
-
 
 /*!
  * KM General base constructor for texture classes
@@ -126,68 +116,66 @@ TextureBaseClass::~TextureBaseClass()
 		D3DTexture = nullptr;
 	}
 
+	// Phase 5h.29 — release the bgfx render target if this texture owns one.
+	// BgfxRenderTarget stays 0 in DX8 mode and on file-loaded / non-RT
+	// procedural textures, so this is a cheap null-check elsewhere.
+#ifndef RTS_RENDERER_DX8
+	if (BgfxRenderTarget != 0)
+	{
+		if (IRenderBackend* b = RenderBackendRuntime::Get_Active())
+		{
+			b->Destroy_Render_Target(BgfxRenderTarget);
+		}
+		BgfxRenderTarget = 0;
+		BgfxTexture = 0;   // the RT's color texture dies with the RT
+	}
+	else if (BgfxTexture != 0)
+	{
+		// Phase 5h.33 — two flavors of non-RT bgfx textures reach the dtor:
+		//   * cache-owned  — loaded via BgfxTextureCache::Get_Or_Load_File
+		//                    during TextureClass::Init; identified by a
+		//                    non-empty full path. Decrement the cache's
+		//                    refcount; the backing texture is destroyed
+		//                    only when the last TextureClass referencing
+		//                    the path goes away.
+		//   * procedural   — allocated by Create_Texture_RGBA8 in the
+		//                    surface ctor (5h.32) or the width/height ctor
+		//                    (5h.28). Identified by an empty full path.
+		//                    Destroy unconditionally — nobody else holds
+		//                    this handle.
+		const StringClass& path = Get_Full_Path();
+		if (!path.Is_Empty())
+		{
+			BgfxTextureCache::Release(path.str());
+		}
+		else if (IRenderBackend* b = RenderBackendRuntime::Get_Active())
+		{
+			b->Destroy_Texture(BgfxTexture);
+		}
+		BgfxTexture = 0;
+	}
+#endif
+
 	DX8TextureManagerClass::Remove(this);
 }
 
-
-
-
-//**********************************************************************************************
-//! Invalidate old unused textures
-/*!
-*/
-void TextureBaseClass::Invalidate_Old_Unused_Textures(unsigned invalidation_time_override)
+// Phase 5h.20 — pure-CPU TextureBaseClass methods. Deps resolve via the WW3D
+// static un-guard from the same phase (Get_Sync_Time is an inline that reads
+// WW3D::SyncTime, now always defined). Invalidate has an early-return for
+// TextureLoadTask != nullptr; in bgfx mode those pointers stay nullptr
+// (TextureLoader is still guarded), so the body reaches D3DTexture->Release
+// (compat-shim stub) + LastAccessed update.
+void TextureBaseClass::Set_Texture_Name(const char * name)
 {
-	// (gth) If thumbnails are not enabled, then we don't run this code.
-	if (WW3D::Get_Thumbnail_Enabled() == false) {
-		return;
-	}
-
-	// Zero the texture apply count in this function because this is called every frame...(this wasn't in E&B main branch KJM)
-	TexturesAppliedPerFrame=0;
-
-	unsigned synctime=WW3D::Get_Sync_Time();
-	HashTemplateIterator<StringClass,TextureClass*> ite(WW3DAssetManager::Get_Instance()->Texture_Hash());
-	// Loop through all the textures in the manager
-
-	for (ite.First ();!ite.Is_Done();ite.Next ())
-	{
-		TextureClass* tex=ite.Peek_Value();
-
-		// Consider invalidating if texture has been initialized and defines inactivation time
-		if (tex->Initialized && tex->InactivationTime)
-		{
-			unsigned age=synctime-tex->LastAccessed;
-
-			if (invalidation_time_override)
-			{
-				if (age>invalidation_time_override)
-				{
-					tex->Invalidate();
-					tex->LastInactivationSyncTime=synctime;
-				}
-			}
-			else
-			{
-				// Not used in the last n milliseconds?
-				if (age>(tex->InactivationTime+tex->ExtendedInactivationTime))
-				{
-					tex->Invalidate();
-					tex->LastInactivationSyncTime=synctime;
-				}
-			}
-		}
-	}
+	Name=name;
 }
 
+void TextureBaseClass::Set_HSV_Shift(const Vector3 &hsv_shift)
+{
+	Invalidate();
+	HSVShift=hsv_shift;
+}
 
-
-
-
-//**********************************************************************************************
-//! Invalidate this texture
-/*!
-*/
 void TextureBaseClass::Invalidate()
 {
 	if (TextureLoadTask) {
@@ -208,60 +196,40 @@ void TextureBaseClass::Invalidate()
 		D3DTexture = nullptr;
 	}
 
+#ifndef RTS_RENDERER_DX8
+	// Phase 5h.33 — mirror the DX8 "drop the D3DTexture" behavior on the
+	// bgfx side. Only cache-owned (file-loaded) handles are touched here;
+	// procedural handles (which we've already skipped above via the
+	// IsProcedural early-return) and RT handles (left in place — RT
+	// textures aren't invalidated, only destroyed at dtor time) are not.
+	// Next Apply() will re-fetch from the cache via TextureClass::Init.
+	if (BgfxTexture != 0 && BgfxRenderTarget == 0)
+	{
+		const StringClass& path = Get_Full_Path();
+		if (!path.Is_Empty())
+		{
+			BgfxTextureCache::Release(path.str());
+		}
+		BgfxTexture = 0;
+	}
+#endif
+
 	Initialized=false;
 
 	LastAccessed=WW3D::Get_Sync_Time();
-/*	was battlefield version// If the texture has already been initialised we should exit now
-	if (Initialized) return;
-
-	WWPROFILE(("TextureClass::Init()"));
-
-	// If the texture has recently been inactivated, increase the inactivation time (this texture obviously
-	// should not have been inactivated yet).
-
-	if (InactivationTime && LastInactivationSyncTime) {
-		if ((WW3D::Get_Sync_Time()-LastInactivationSyncTime)<InactivationTime) {
-			ExtendedInactivationTime=3*InactivationTime;
-		}
-		LastInactivationSyncTime=0;
-	}
-
-	if (ThumbnailLoadTask)
-	{
-		return;
-	}
-
-	// Don't invalidate procedural textures
-	if (IsProcedural)
-	{
-		return;
-	}
-
-	if (D3DTexture)
-	{
-		D3DTexture->Release();
-		D3DTexture = nullptr;
-	}
-
-	Initialized=false;
-
-	LastAccessed=WW3D::Get_Sync_Time();*/
 }
 
-//**********************************************************************************************
-//! Returns a pointer to the d3d texture
-/*!
-*/
+// Phase 5h.21 — D3D texture accessors. Both `D3DTexture->AddRef/Release`
+// resolve through the compat-shim; `WW3D::Get_Sync_Time()` now links
+// (moved above the ww3d guard in 5h.20). The bgfx-mode `D3DTexture`
+// pointer stays nullptr until 5h.22+ wires the texture-load path, so
+// these accessors return null / no-op but are linkable.
 IDirect3DBaseTexture8 * TextureBaseClass::Peek_D3D_Base_Texture() const
 {
 	LastAccessed=WW3D::Get_Sync_Time();
 	return D3DTexture;
 }
 
-//**********************************************************************************************
-//! Set the d3d texture pointer.  Handles ref counts properly.
-/*!
-*/
 void TextureBaseClass::Set_D3D_Base_Texture(IDirect3DBaseTexture8* tex)
 {
 	// (gth) Generals does stuff directly with the D3DTexture pointer so lets
@@ -277,25 +245,51 @@ void TextureBaseClass::Set_D3D_Base_Texture(IDirect3DBaseTexture8* tex)
 	}
 }
 
+// Phase 5h.21 — priority pass-through. Compat-shim GetPriority/SetPriority
+// return 0; in bgfx mode priority is meaningless (bgfx manages its own
+// texture cache eviction). Callers that asserted on null D3DTexture in DX8
+// keep doing so; the nullptr path fires WWASSERT_PRINT + returns 0.
+unsigned int TextureBaseClass::Get_Priority()
+{
+	if (!D3DTexture)
+	{
+		WWASSERT_PRINT(0, "Get_Priority: D3DTexture is null!");
+		return 0;
+	}
 
-//**********************************************************************************************
-//! Load locked surface
-/*!
-*/
+	return D3DTexture->GetPriority();
+}
+
+unsigned int TextureBaseClass::Set_Priority(unsigned int priority)
+{
+	if (!D3DTexture)
+	{
+		WWASSERT_PRINT(0, "Set_Priority: D3DTexture is null!");
+		return 0;
+	}
+
+	return D3DTexture->SetPriority(priority);
+}
+
+// Phase 5h.22 — MissingTexture + TextureLoader bridge methods. In bgfx mode
+// the functions they delegate to exist as no-op stubs (MissingTexture's
+// `_Get_Missing_Texture` returns nullptr; TextureLoader's `Request_Thumbnail`
+// is a no-op). So these methods link but are runtime-cold until Phase 5h.25+
+// wires the full texture-load pipeline.
+#include "missingtexture.h"
+#include "textureloader.h"
+
 void TextureBaseClass::Load_Locked_Surface()
 {
-	WWPROFILE(("TextureClass::Load_Locked_Surface()"));
+	// WWPROFILE intentionally dropped here — wwprofile.h pulls in threading
+	// macros we haven't verified for bgfx-mode builds yet. Re-add once the
+	// profile macros are confirmed safe outside the guard.
 	if (D3DTexture) D3DTexture->Release();
 	D3DTexture=nullptr;
 	TextureLoader::Request_Thumbnail(this);
 	Initialized=false;
 }
 
-
-//**********************************************************************************************
-//! Is missing texture
-/*!
-*/
 bool TextureBaseClass::Is_Missing_Texture()
 {
 	bool flag = false;
@@ -312,65 +306,164 @@ bool TextureBaseClass::Is_Missing_Texture()
 	return flag;
 }
 
+// Phase 5h.23 — TextureBaseClass total-accounting + invalidation methods.
+// Each walks `WW3DAssetManager::Get_Instance()->Texture_Hash()`. In bgfx
+// mode `Get_Instance()` returns nullptr (nothing constructs the asset
+// manager), so each method null-guards and returns a zero / empty result.
+// Moved here so `DX8VertexBufferClass::Create_Vertex_Buffer`'s recovery
+// path can call `Invalidate_Old_Unused_Textures` without the 5h.15 surgical
+// `#ifdef` guard.
+#include "assetmgr.h"
 
-//**********************************************************************************************
-//! Set texture name
-/*!
-*/
-void TextureBaseClass::Set_Texture_Name(const char * name)
+void TextureBaseClass::Invalidate_Old_Unused_Textures(unsigned invalidation_time_override)
 {
-	Name=name;
-}
-
-
-
-
-//**********************************************************************************************
-//! Get priority
-/*!
-*/
-unsigned int TextureBaseClass::Get_Priority()
-{
-	if (!D3DTexture)
-	{
-		WWASSERT_PRINT(0, "Get_Priority: D3DTexture is null!");
-		return 0;
+	if (WW3D::Get_Thumbnail_Enabled() == false) {
+		return;
 	}
+	WW3DAssetManager* mgr = WW3DAssetManager::Get_Instance();
+	if (mgr == nullptr) return;
 
-	return D3DTexture->GetPriority();
-}
-
-
-//**********************************************************************************************
-//! Set priority
-/*!
-*/
-unsigned int TextureBaseClass::Set_Priority(unsigned int priority)
-{
-	if (!D3DTexture)
+	unsigned synctime=WW3D::Get_Sync_Time();
+	HashTemplateIterator<StringClass,TextureClass*> ite(mgr->Texture_Hash());
+	for (ite.First ();!ite.Is_Done();ite.Next ())
 	{
-		WWASSERT_PRINT(0, "Set_Priority: D3DTexture is null!");
-		return 0;
+		TextureClass* tex=ite.Peek_Value();
+		if (tex->Initialized && tex->InactivationTime)
+		{
+			unsigned age=synctime-tex->LastAccessed;
+			if (invalidation_time_override)
+			{
+				if (age>invalidation_time_override)
+				{
+					tex->Invalidate();
+					tex->LastInactivationSyncTime=synctime;
+				}
+			}
+			else
+			{
+				if (age>(tex->InactivationTime+tex->ExtendedInactivationTime))
+				{
+					tex->Invalidate();
+					tex->LastInactivationSyncTime=synctime;
+				}
+			}
+		}
 	}
-
-	return D3DTexture->SetPriority(priority);
 }
 
+int TextureBaseClass::_Get_Total_Locked_Surface_Size()
+{
+	WW3DAssetManager* mgr = WW3DAssetManager::Get_Instance();
+	if (mgr == nullptr) return 0;
+	int total=0;
+	HashTemplateIterator<StringClass,TextureClass*> ite(mgr->Texture_Hash());
+	for (ite.First ();!ite.Is_Done();ite.Next ()) {
+		TextureBaseClass* tex=ite.Peek_Value();
+		if (!tex->Initialized) total+=tex->Get_Texture_Memory_Usage();
+	}
+	return total;
+}
 
-//**********************************************************************************************
-//! Get reduction mip levels
-/*!
-*/
+int TextureBaseClass::_Get_Total_Texture_Size()
+{
+	WW3DAssetManager* mgr = WW3DAssetManager::Get_Instance();
+	if (mgr == nullptr) return 0;
+	int total=0;
+	HashTemplateIterator<StringClass,TextureClass*> ite(mgr->Texture_Hash());
+	for (ite.First ();!ite.Is_Done();ite.Next ())
+		total+=ite.Peek_Value()->Get_Texture_Memory_Usage();
+	return total;
+}
+
+int TextureBaseClass::_Get_Total_Lightmap_Texture_Size()
+{
+	WW3DAssetManager* mgr = WW3DAssetManager::Get_Instance();
+	if (mgr == nullptr) return 0;
+	int total=0;
+	HashTemplateIterator<StringClass,TextureClass*> ite(mgr->Texture_Hash());
+	for (ite.First ();!ite.Is_Done();ite.Next ()) {
+		TextureBaseClass* tex=ite.Peek_Value();
+		if (tex->Is_Lightmap()) total+=tex->Get_Texture_Memory_Usage();
+	}
+	return total;
+}
+
+int TextureBaseClass::_Get_Total_Procedural_Texture_Size()
+{
+	WW3DAssetManager* mgr = WW3DAssetManager::Get_Instance();
+	if (mgr == nullptr) return 0;
+	int total=0;
+	HashTemplateIterator<StringClass,TextureClass*> ite(mgr->Texture_Hash());
+	for (ite.First ();!ite.Is_Done();ite.Next ()) {
+		TextureBaseClass* tex=ite.Peek_Value();
+		if (tex->Is_Procedural()) total+=tex->Get_Texture_Memory_Usage();
+	}
+	return total;
+}
+
+int TextureBaseClass::_Get_Total_Texture_Count()
+{
+	WW3DAssetManager* mgr = WW3DAssetManager::Get_Instance();
+	if (mgr == nullptr) return 0;
+	int count=0;
+	HashTemplateIterator<StringClass,TextureClass*> ite(mgr->Texture_Hash());
+	for (ite.First ();!ite.Is_Done();ite.Next ()) ++count;
+	return count;
+}
+
+int TextureBaseClass::_Get_Total_Lightmap_Texture_Count()
+{
+	WW3DAssetManager* mgr = WW3DAssetManager::Get_Instance();
+	if (mgr == nullptr) return 0;
+	int count=0;
+	HashTemplateIterator<StringClass,TextureClass*> ite(mgr->Texture_Hash());
+	for (ite.First ();!ite.Is_Done();ite.Next ())
+		if (ite.Peek_Value()->Is_Lightmap()) ++count;
+	return count;
+}
+
+int TextureBaseClass::_Get_Total_Procedural_Texture_Count()
+{
+	WW3DAssetManager* mgr = WW3DAssetManager::Get_Instance();
+	if (mgr == nullptr) return 0;
+	int count=0;
+	HashTemplateIterator<StringClass,TextureClass*> ite(mgr->Texture_Hash());
+	for (ite.First ();!ite.Is_Done();ite.Next ())
+		if (ite.Peek_Value()->Is_Procedural()) ++count;
+	return count;
+}
+
+int TextureBaseClass::_Get_Total_Locked_Surface_Count()
+{
+	WW3DAssetManager* mgr = WW3DAssetManager::Get_Instance();
+	if (mgr == nullptr) return 0;
+	int count=0;
+	HashTemplateIterator<StringClass,TextureClass*> ite(mgr->Texture_Hash());
+	for (ite.First ();!ite.Is_Done();ite.Next ())
+		if (!ite.Peek_Value()->Initialized) ++count;
+	return count;
+}
+
+// Phase 5h.24 — last two TextureBaseClass methods. Apply_Null forwards to
+// DX8Wrapper::Set_DX8_Texture which is inline (header); the DX8CALL macro
+// it uses is a no-op in bgfx mode, and the Textures[] static array it
+// updates is defined outside the guard since 5h.13 era. Get_Reduction
+// reads WW3D::Get_Texture_Reduction + Is_Large_Texture_Extra_Reduction_Enabled
+// which landed above the ww3d.cpp guard in the 5h.24 prerequisite step.
+#include "dx8wrapper.h"
+
+void TextureBaseClass::Apply_Null(unsigned int stage)
+{
+	DX8Wrapper::Set_DX8_Texture(stage, nullptr);
+}
+
 unsigned TextureBaseClass::Get_Reduction() const
 {
-	// don't reduce if the texture is too small already or
-	// has no mip map levels
 	if (MipLevelCount==MIP_LEVELS_1) return 0;
 	if (Width <= 32 || Height <= 32) return 0;
 
 	int reduction=WW3D::Get_Texture_Reduction();
 
-	// 'large texture extra reduction' causes textures above 256x256 to be reduced one more step.
 	if (WW3D::Is_Large_Texture_Extra_Reduction_Enabled() && (Width > 256 || Height > 256)) {
 		reduction++;
 	}
@@ -380,204 +473,473 @@ unsigned TextureBaseClass::Get_Reduction() const
 	return reduction;
 }
 
+// Phase 5h.25/5h.27 — bgfx-mode TextureClass implementations. The DX8 path
+// (the main #ifdef block below) handles real GPU texture creation + mipmap
+// loading + texture-loader thread handoff. In bgfx mode the equivalent
+// responsibilities land on `BgfxTextureCache::Get_Or_Load_File` (from 5h.3),
+// which decodes DDS/KTX/PNG via bimg and uploads through the active
+// IRenderBackend. Ctors store only the metadata; Init triggers the cache
+// lookup + handle assignment; Apply forwards the handle to the backend.
+#ifndef RTS_RENDERER_DX8
 
+#include "BGFXDevice/Common/BgfxTextureCache.h"
+#include "WW3D2/RenderBackendRuntime.h"
+#include "WW3D2/IRenderBackend.h"
 
-//**********************************************************************************************
-//! Apply null texture state
-/*!
-*/
-void TextureBaseClass::Apply_Null(unsigned int stage)
+const unsigned DEFAULT_INACTIVATION_TIME_BGFX = 20000;
+
+TextureClass::TextureClass
+(
+	unsigned width,
+	unsigned height,
+	WW3DFormat format,
+	MipCountType mip_level_count,
+	PoolType pool,
+	bool rendertarget,
+	bool allow_reduction
+)
+:	TextureBaseClass(width, height, mip_level_count, pool, rendertarget, allow_reduction),
+	TextureFormat(format),
+	Filter(mip_level_count)
 {
-	// This function sets the render states for a "null" texture
+	Initialized=true;
+	IsProcedural=true;
+	IsReducible=false;
+	LastAccessed=WW3D::Get_Sync_Time();
+
+	// Phase 5h.28/29 — allocate backend storage. Two paths:
+	//   - rendertarget == false: plain 2D texture via Create_Texture_RGBA8(null).
+	//     Empty contents; callers fill via the still-to-come Update_Texture.
+	//   - rendertarget == true: frame-buffer-backed via Create_Render_Target.
+	//     The RT's color attachment is extracted via Get_Render_Target_Texture
+	//     and stored as the sampler handle, so `Apply(stage)` binds the RT's
+	//     color texture for post-process sampling. The RT handle itself is
+	//     kept in `BgfxRenderTarget` so the dtor can release it.
+	if (width > 0 && height > 0)
+	{
+		if (IRenderBackend* b = RenderBackendRuntime::Get_Active())
+		{
+			if (rendertarget)
+			{
+				const uintptr_t rt = b->Create_Render_Target(
+					static_cast<uint16_t>(width),
+					static_cast<uint16_t>(height),
+					/*hasDepth=*/true);
+				Set_Bgfx_Render_Target(rt);
+				if (rt != 0)
+				{
+					Set_Bgfx_Handle(b->Get_Render_Target_Texture(rt));
+				}
+			}
+			else
+			{
+				const bool mipmap = (mip_level_count != MIP_LEVELS_1);
+				const uintptr_t h = b->Create_Texture_RGBA8(
+					/*pixels=*/nullptr,
+					static_cast<uint16_t>(width),
+					static_cast<uint16_t>(height),
+					mipmap);
+				Set_Bgfx_Handle(h);
+			}
+		}
+	}
+}
+
+TextureClass::TextureClass
+(
+	const char *name,
+	const char *full_path,
+	MipCountType mip_level_count,
+	WW3DFormat texture_format,
+	bool allow_compression,
+	bool allow_reduction
+)
+:	TextureBaseClass(0, 0, mip_level_count),
+	TextureFormat(texture_format),
+	Filter(mip_level_count)
+{
+	IsCompressionAllowed=allow_compression;
+	InactivationTime=DEFAULT_INACTIVATION_TIME_BGFX;
+	IsReducible=allow_reduction;
+
+	if (name)
+	{
+		// Copy the lightmap-flag detection (see DX8 ctor) — materials that
+		// reference this texture need the flag to route through the right
+		// shader path.
+		for (const char* p=name; *p; ++p)
+		{
+			if (*p=='+')
+			{
+				IsLightmap=true;
+				break;
+			}
+		}
+		Set_Texture_Name(name);
+	}
+	if (full_path)
+		Set_Full_Path(full_path);
+
+	LastAccessed=WW3D::Get_Sync_Time();
+	// Initialized stays false — the BgfxTextureCache bridge in 5h.27 flips
+	// it when the texture file has been loaded + uploaded.
+}
+
+TextureClass::TextureClass
+(
+	SurfaceClass* surface,
+	MipCountType mip_level_count
+)
+:	TextureBaseClass(0, 0, mip_level_count),
+	TextureFormat(surface ? surface->Get_Surface_Format() : WW3D_FORMAT_UNKNOWN),
+	Filter(mip_level_count)
+{
+	IsProcedural=true;
+	Initialized=true;
+	IsReducible=false;
+
+	// Phase 5h.32 — take on the surface's dimensions + back it with a real
+	// bgfx texture handle, then tie the surface to that handle so any
+	// subsequent Lock/Unlock on the surface re-uploads into this texture.
+	if (surface) {
+		SurfaceClass::SurfaceDescription sd;
+		surface->Get_Description(sd);
+		Width = sd.Width;
+		Height = sd.Height;
+		if (IRenderBackend* backend = RenderBackendRuntime::Get_Active()) {
+			if (sd.Width && sd.Height) {
+				const uintptr_t handle = backend->Create_Texture_RGBA8(
+					nullptr,
+					static_cast<uint16_t>(sd.Width),
+					static_cast<uint16_t>(sd.Height),
+					/*mipmap=*/false);
+				if (handle) {
+					Set_Bgfx_Handle(handle);
+					surface->Set_Associated_Texture(handle);
+					// Seed the GPU copy with whatever the surface already
+					// holds. A Lock/Unlock cycle is the cheapest way to
+					// route through SurfaceClass's upload path without
+					// duplicating the BGRA→RGBA swizzle here.
+					int pitch = 0;
+					(void)surface->Lock(&pitch);
+					surface->Unlock();
+				}
+			}
+		}
+	}
+
+	LastAccessed=WW3D::Get_Sync_Time();
+}
+
+TextureClass::TextureClass(IDirect3DBaseTexture8* /*d3d_texture*/)
+:	TextureBaseClass(0, 0, MIP_LEVELS_ALL),
+	Filter(MIP_LEVELS_ALL)
+{
+	Initialized=true;
+	IsProcedural=true;
+	IsReducible=false;
+	LastAccessed=WW3D::Get_Sync_Time();
+}
+
+void TextureClass::Init()
+{
+	if (Initialized) return;
+
+	// Phase 5h.27 — the headline wire-up. Resolve the cache-key path:
+	// `Get_Full_Path()` returns full_path when set, otherwise the texture
+	// name. If both are empty (procedural textures from the width/height
+	// ctor, for example), skip the cache load — those textures stay as
+	// empty handles and bind to the backend's placeholder.
+	if (Peek_Bgfx_Handle() == 0)
+	{
+		const StringClass& path = Get_Full_Path();
+		if (!path.Is_Empty())
+		{
+			uintptr_t handle = BgfxTextureCache::Get_Or_Load_File(path.str());
+			Set_Bgfx_Handle(handle);
+
+			// Phase 5h.36 — if the file on disk had no mip chain, downgrade
+			// the Filter's mip mode so `Filter.Apply(stage)` pushes MIP_POINT
+			// + hasMips=false to the backend. Without this a DDS baked with
+			// one mip level would be sampled with a linear mip filter,
+			// yielding undefined (driver-dependent) results at higher LODs.
+			if (handle != 0)
+			{
+				if (IRenderBackend* b = RenderBackendRuntime::Get_Active())
+				{
+					if (b->Texture_Mip_Count(handle) <= 1)
+						Filter.Set_Mip_Mapping(TextureFilterClass::FILTER_TYPE_NONE);
+				}
+			}
+		}
+	}
+
+	Initialized = true;
+	LastAccessed = WW3D::Get_Sync_Time();
+}
+
+void TextureClass::Apply_New_Surface
+(
+	IDirect3DBaseTexture8* /*tex*/,
+	bool initialized,
+	bool disable_auto_invalidation
+)
+{
+	if (initialized) Initialized=true;
+	if (disable_auto_invalidation) InactivationTime=0;
+}
+
+void TextureClass::Apply(unsigned int stage)
+{
+	if (!Initialized) Init();
+	LastAccessed = WW3D::Get_Sync_Time();
+
+	// Phase 5h.27 — bind the cached bgfx handle to the requested stage.
+	// A zero handle falls back to the backend's built-in 2×2 placeholder
+	// (`BgfxBackend::m_placeholderTexture`), which is the same behavior
+	// the stub had pre-5h.27.
+	if (IRenderBackend* b = RenderBackendRuntime::Get_Active())
+	{
+		b->Set_Texture(stage, Peek_Bgfx_Handle());
+	}
+
+	// DX8 side-effect stays (updates the Textures[] array so callers that
+	// peek via DX8Wrapper see the null-binding state); DX8CALL is a no-op
+	// in bgfx mode so this is cheap.
 	DX8Wrapper::Set_DX8_Texture(stage, nullptr);
+
+	// Phase 5h.34 — push the per-stage sampler state (filter + addr + mips).
+	Filter.Apply(stage);
 }
 
-// ----------------------------------------------------------------------------
-// Setting HSV_Shift value is always relative to the original texture. This function invalidates the
-// texture surface and causes the texture to be reloaded. For thumbnailable textures, the hue shifting
-// is done in the background loading thread.
-// ----------------------------------------------------------------------------
-void TextureBaseClass::Set_HSV_Shift(const Vector3 &hsv_shift)
+unsigned TextureClass::Get_Texture_Memory_Usage() const
 {
-	Invalidate();
-	HSVShift=hsv_shift;
+	// No D3D texture allocated in bgfx mode today; real bgfx-side memory is
+	// accounted by bgfx's own stats API (not plumbed through here yet).
+	return 0;
 }
 
-//**********************************************************************************************
-//! Get total locked surface size
-/*! KM
-*/
-int TextureBaseClass::_Get_Total_Locked_Surface_Size()
+// Phase 5h.26 — ZTextureClass stubs. Z-only textures (depth buffers) are not
+// a primary render path in bgfx mode; render targets handle their own depth
+// attachments. Stubs just keep the symbol table populated.
+ZTextureClass::ZTextureClass
+(
+	unsigned width,
+	unsigned height,
+	WW3DZFormat zformat,
+	MipCountType mip_level_count,
+	PoolType pool
+)
+:	TextureBaseClass(width, height, mip_level_count, pool, /*rendertarget=*/true, /*reducible=*/false),
+	DepthStencilTextureFormat(zformat)
 {
-	int total_locked_surface_size=0;
-
-	HashTemplateIterator<StringClass,TextureClass*> ite(WW3DAssetManager::Get_Instance()->Texture_Hash());
-	// Loop through all the textures in the manager
-	for (ite.First ();!ite.Is_Done();ite.Next ())
-	{
-		// Get the current texture
-		TextureBaseClass* tex=ite.Peek_Value();
-		if (!tex->Initialized)
-		{
-			total_locked_surface_size+=tex->Get_Texture_Memory_Usage();
-		}
-	}
-	return total_locked_surface_size;
+	Initialized=true;
+	IsProcedural=true;
+	LastAccessed=WW3D::Get_Sync_Time();
 }
 
-//**********************************************************************************************
-//! Get total texture size
-/*! KM
-*/
-int TextureBaseClass::_Get_Total_Texture_Size()
+void ZTextureClass::Apply(unsigned int /*stage*/)
 {
-	int total_texture_size=0;
-
-	HashTemplateIterator<StringClass,TextureClass*> ite(WW3DAssetManager::Get_Instance()->Texture_Hash());
-	// Loop through all the textures in the manager
-	for (ite.First ();!ite.Is_Done();ite.Next ())
-	{
-		// Get the current texture
-		TextureBaseClass* tex=ite.Peek_Value();
-		total_texture_size+=tex->Get_Texture_Memory_Usage();
-	}
-	return total_texture_size;
+	// Depth textures aren't sampled in the uber-shader today; no-op.
 }
 
-// ----------------------------------------------------------------------------
-
-
-//**********************************************************************************************
-//! Get total lightmap texture size
-/*!
-*/
-int TextureBaseClass::_Get_Total_Lightmap_Texture_Size()
+void ZTextureClass::Apply_New_Surface
+(
+	IDirect3DBaseTexture8* /*tex*/,
+	bool initialized,
+	bool /*disable_auto_invalidation*/
+)
 {
-	int total_texture_size=0;
-
-	HashTemplateIterator<StringClass,TextureClass*> ite(WW3DAssetManager::Get_Instance()->Texture_Hash());
-	// Loop through all the textures in the manager
-	for (ite.First ();!ite.Is_Done();ite.Next ())
-	{
-		// Get the current texture
-		TextureBaseClass* tex=ite.Peek_Value();
-		if (tex->Is_Lightmap())
-		{
-			total_texture_size+=tex->Get_Texture_Memory_Usage();
-		}
-	}
-	return total_texture_size;
+	if (initialized) Initialized=true;
 }
 
-
-//**********************************************************************************************
-//! Get total procedural texture size
-/*!
-*/
-int TextureBaseClass::_Get_Total_Procedural_Texture_Size()
+IDirect3DSurface8* ZTextureClass::Get_D3D_Surface_Level(unsigned int /*level*/)
 {
-	int total_texture_size=0;
-
-	HashTemplateIterator<StringClass,TextureClass*> ite(WW3DAssetManager::Get_Instance()->Texture_Hash());
-	// Loop through all the textures in the manager
-	for (ite.First ();!ite.Is_Done();ite.Next ())
-	{
-		// Get the current texture
-		TextureBaseClass* tex=ite.Peek_Value();
-		if (tex->Is_Procedural())
-		{
-			total_texture_size+=tex->Get_Texture_Memory_Usage();
-		}
-	}
-	return total_texture_size;
+	return nullptr;
 }
 
-//**********************************************************************************************
-//! Get total texture count
-/*!
-*/
-int TextureBaseClass::_Get_Total_Texture_Count()
+unsigned ZTextureClass::Get_Texture_Memory_Usage() const
 {
-	int texture_count=0;
-
-	HashTemplateIterator<StringClass,TextureClass*> ite(WW3DAssetManager::Get_Instance()->Texture_Hash());
-	// Loop through all the textures in the manager
-	for (ite.First ();!ite.Is_Done();ite.Next ())
-	{
-		texture_count++;
-	}
-
-	return texture_count;
+	return 0;
 }
 
-// ----------------------------------------------------------------------------
-
-
-//**********************************************************************************************
-//! Get total light map texture count
-/*!
-*/
-int TextureBaseClass::_Get_Total_Lightmap_Texture_Count()
+// Phase 5h.26 — CubeTextureClass stubs. Inherits from TextureClass so the
+// base ctor gets called through the TextureClass-for-derived overload in the
+// header. Three of the four overloads exist to catch asset-manager paths
+// that might try to load a cubemap; they reduce to the same minimum init.
+CubeTextureClass::CubeTextureClass
+(
+	unsigned width,
+	unsigned height,
+	WW3DFormat format,
+	MipCountType mip_level_count,
+	PoolType pool,
+	bool rendertarget,
+	bool allow_reduction
+)
+:	TextureClass(width, height, mip_level_count, pool, rendertarget, format, allow_reduction)
 {
-	int texture_count=0;
-
-	HashTemplateIterator<StringClass,TextureClass*> ite(WW3DAssetManager::Get_Instance()->Texture_Hash());
-	// Loop through all the textures in the manager
-	for (ite.First ();!ite.Is_Done();ite.Next ())
-	{
-		if (ite.Peek_Value()->Is_Lightmap())
-		{
-			texture_count++;
-		}
-	}
-
-	return texture_count;
+	Initialized=true;
+	IsProcedural=true;
+	LastAccessed=WW3D::Get_Sync_Time();
 }
 
-//**********************************************************************************************
-//! Get total procedural texture count
-/*!
-*/
-int TextureBaseClass::_Get_Total_Procedural_Texture_Count()
+CubeTextureClass::CubeTextureClass
+(
+	const char *name,
+	const char *full_path,
+	MipCountType mip_level_count,
+	WW3DFormat texture_format,
+	bool allow_compression,
+	bool allow_reduction
+)
+:	TextureClass(name, full_path, mip_level_count, texture_format, allow_compression, allow_reduction)
 {
-	int texture_count=0;
-
-	HashTemplateIterator<StringClass,TextureClass*> ite(WW3DAssetManager::Get_Instance()->Texture_Hash());
-	// Loop through all the textures in the manager
-	for (ite.First ();!ite.Is_Done();ite.Next ())
-	{
-		if (ite.Peek_Value()->Is_Procedural())
-		{
-			texture_count++;
-		}
-	}
-
-	return texture_count;
 }
 
-
-//**********************************************************************************************
-//! Get total locked surface count
-/*!
-*/
-int TextureBaseClass::_Get_Total_Locked_Surface_Count()
+CubeTextureClass::CubeTextureClass
+(
+	SurfaceClass *surface,
+	MipCountType mip_level_count
+)
+:	TextureClass(surface, mip_level_count)
 {
-	int texture_count=0;
-
-	HashTemplateIterator<StringClass,TextureClass*> ite(WW3DAssetManager::Get_Instance()->Texture_Hash());
-	// Loop through all the textures in the manager
-	for (ite.First ();!ite.Is_Done();ite.Next ())
-	{
-		// Get the current texture
-		TextureBaseClass* tex=ite.Peek_Value();
-		if (!tex->Initialized)
-		{
-			texture_count++;
-		}
-	}
-
-	return texture_count;
 }
+
+CubeTextureClass::CubeTextureClass(IDirect3DBaseTexture8* d3d_texture)
+:	TextureClass(d3d_texture)
+{
+}
+
+void CubeTextureClass::Apply_New_Surface
+(
+	IDirect3DBaseTexture8* /*tex*/,
+	bool initialized,
+	bool disable_auto_invalidation
+)
+{
+	if (initialized) Initialized=true;
+	if (disable_auto_invalidation) InactivationTime=0;
+}
+
+// Phase 5h.26 — VolumeTextureClass stubs. Same pattern as CubeTextureClass
+// but with an additional `depth` dimension the DX8 ctor uses for slice count.
+// Stubs just remember it in the Depth member.
+VolumeTextureClass::VolumeTextureClass
+(
+	unsigned width,
+	unsigned height,
+	unsigned depth,
+	WW3DFormat format,
+	MipCountType mip_level_count,
+	PoolType pool,
+	bool rendertarget,
+	bool allow_reduction
+)
+:	TextureClass(width, height, mip_level_count, pool, rendertarget, format, allow_reduction)
+{
+	Depth=static_cast<int>(depth);
+	Initialized=true;
+	IsProcedural=true;
+	LastAccessed=WW3D::Get_Sync_Time();
+}
+
+VolumeTextureClass::VolumeTextureClass
+(
+	const char *name,
+	const char *full_path,
+	MipCountType mip_level_count,
+	WW3DFormat texture_format,
+	bool allow_compression,
+	bool allow_reduction
+)
+:	TextureClass(name, full_path, mip_level_count, texture_format, allow_compression, allow_reduction)
+{
+	Depth=0;
+}
+
+VolumeTextureClass::VolumeTextureClass
+(
+	SurfaceClass *surface,
+	MipCountType mip_level_count
+)
+:	TextureClass(surface, mip_level_count)
+{
+	Depth=0;
+}
+
+VolumeTextureClass::VolumeTextureClass(IDirect3DBaseTexture8* d3d_texture)
+:	TextureClass(d3d_texture)
+{
+	Depth=0;
+}
+
+void VolumeTextureClass::Apply_New_Surface
+(
+	IDirect3DBaseTexture8* /*tex*/,
+	bool initialized,
+	bool disable_auto_invalidation
+)
+{
+	if (initialized) Initialized=true;
+	if (disable_auto_invalidation) InactivationTime=0;
+}
+
+#endif // !RTS_RENDERER_DX8
+
+#ifdef RTS_RENDERER_DX8
+
+#include <d3d8.h>
+#include <d3dx8core.h>
+#include "dx8wrapper.h"
+#include "TARGA.h"
+#include <nstrdup.h>
+#include "w3d_file.h"
+#include "assetmgr.h"
+#include "formconv.h"
+#include "textureloader.h"
+#include "missingtexture.h"
+#include "ffactory.h"
+#include "dx8caps.h"
+#include "meshmatdesc.h"
+#include "texturethumbnail.h"
+#include "wwprofile.h"
+
+const unsigned DEFAULT_INACTIVATION_TIME=20000;
+
+// This throttles submissions to the background texture loading queue.
+static unsigned TexturesAppliedPerFrame;
+const unsigned MAX_TEXTURES_APPLIED_PER_FRAME=2;
+
+
+
+
+// Phase 5h.23 — TextureBaseClass::Invalidate_Old_Unused_Textures moved above the guard.
+
+
+
+
+
+// Phase 5h.20 — TextureBaseClass::Invalidate moved above the guard.
+
+// Phase 5h.21 — TextureBaseClass::Peek_D3D_Base_Texture and Set_D3D_Base_Texture moved above the guard.
+
+// Phase 5h.22 — TextureBaseClass::Load_Locked_Surface and Is_Missing_Texture moved above the guard.
+
+
+// Phase 5h.20 — TextureBaseClass::Set_Texture_Name moved above the guard.
+
+
+
+
+// Phase 5h.21 — TextureBaseClass::Get_Priority / Set_Priority moved above the guard.
+
+
+// Phase 5h.24 — TextureBaseClass::Apply_Null and Get_Reduction moved above the guard.
+
+// Phase 5h.20 — TextureBaseClass::Set_HSV_Shift moved above the guard.
+
+// Phase 5h.23 — all TextureBaseClass::_Get_Total_* methods moved above the guard.
 
 /*************************************************************************
 **                             TextureClass

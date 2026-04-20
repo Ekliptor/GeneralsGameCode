@@ -40,38 +40,22 @@
 //#define VERTEX_BUFFER_LOG
 
 #include "dx8vertexbuffer.h"
-#ifdef RTS_RENDERER_DX8
 #include "dx8wrapper.h"
 #include "dx8fvf.h"
-#include "dx8caps.h"
-#include "thread.h"
 #include "wwmemlog.h"
 
-#define DEFAULT_VB_SIZE 5000
-
-static bool _DynamicSortingVertexArrayInUse=false;
-//static VertexFormatXYZNDUV2* _DynamicSortingVertexArray=nullptr;
-static SortingVertexBufferClass* _DynamicSortingVertexArray=nullptr;
-static unsigned short _DynamicSortingVertexArraySize=0;
-static unsigned short _DynamicSortingVertexArrayOffset=0;
-
-static bool _DynamicDX8VertexBufferInUse=false;
-static DX8VertexBufferClass* _DynamicDX8VertexBuffer=nullptr;
-static unsigned short _DynamicDX8VertexBufferSize=DEFAULT_VB_SIZE;
-static unsigned short _DynamicDX8VertexBufferOffset=0;
-
-static const FVFInfoClass _DynamicFVFInfo(dynamic_fvf_type);
-
-static int _DX8VertexBufferCount=0;
-
+// Phase 5h.13 — base-class accumulators shared by both DX8 and bgfx builds.
+// In bgfx mode the constructor path is cold (no one constructs a VB yet),
+// but the symbols must link so headers + code that holds `VertexBufferClass*`
+// references compile.
+// Phase 5h.14 — sorting buffer classes + Lock classes also live here; they
+// reference `DX8VertexBufferClass` via pointer cast + inline accessor +
+// compat-shim Lock/Unlock stubs, so the dispatch compiles even when the
+// DX8 subclass's ctor is still inside the guard.
 static int _VertexBufferCount;
 static int _VertexBufferTotalVertices;
 static int _VertexBufferTotalSize;
 
-// ----------------------------------------------------------------------------
-//
-//
-//
 // ----------------------------------------------------------------------------
 
 VertexBufferClass::VertexBufferClass(unsigned type_, unsigned FVF, unsigned short vertex_count_, unsigned vertex_size)
@@ -174,11 +158,18 @@ VertexBufferClass::WriteLockClass::WriteLockClass(VertexBufferClass* VertexBuffe
 		}
 #endif
 		DX8_Assert();
-		DX8_ErrorCode(static_cast<DX8VertexBufferClass*>(VertexBuffer)->Get_DX8_Vertex_Buffer()->Lock(
+		{
+		auto* dxVB = static_cast<DX8VertexBufferClass*>(VertexBuffer);
+		DX8_ErrorCode(dxVB->Get_DX8_Vertex_Buffer()->Lock(
 			0,
 			0,
 			(unsigned char**)&Vertices,
 			flags));	//flags
+		// Phase 5h.18 — fall back to the CPU shadow when Lock returns null
+		// (compat-shim stub in bgfx mode). DX8 mode gets real GPU memory
+		// here and never reads the shadow.
+		if (Vertices == nullptr) Vertices = dxVB->Get_Cpu_Shadow();
+		}
 		break;
 	case BUFFER_TYPE_SORTING:
 		Vertices=static_cast<SortingVertexBufferClass*>(VertexBuffer)->VertexBuffer;
@@ -240,11 +231,21 @@ VertexBufferClass::AppendLockClass::AppendLockClass(VertexBufferClass* VertexBuf
 		}
 #endif
 		DX8_Assert();
-		DX8_ErrorCode(static_cast<DX8VertexBufferClass*>(VertexBuffer)->Get_DX8_Vertex_Buffer()->Lock(
-			start_index*VertexBuffer->FVF_Info().Get_FVF_Size(),
-			index_range*VertexBuffer->FVF_Info().Get_FVF_Size(),
+		{
+		auto* dxVB = static_cast<DX8VertexBufferClass*>(VertexBuffer);
+		const unsigned fvfSize = VertexBuffer->FVF_Info().Get_FVF_Size();
+		DX8_ErrorCode(dxVB->Get_DX8_Vertex_Buffer()->Lock(
+			start_index*fvfSize,
+			index_range*fvfSize,
 			(unsigned char**)&Vertices,
 			0));	// Default (no) flags
+		// Phase 5h.18 — shadow fallback; offset by start_index so the
+		// returned pointer matches the DX8 path's byte offset semantics.
+		if (Vertices == nullptr) {
+			if (auto* shadow = dxVB->Get_Cpu_Shadow())
+				Vertices = shadow + start_index * fvfSize;
+		}
+		}
 		break;
 	case BUFFER_TYPE_SORTING:
 		Vertices=static_cast<SortingVertexBufferClass*>(VertexBuffer)->VertexBuffer+start_index;
@@ -298,6 +299,35 @@ SortingVertexBufferClass::~SortingVertexBufferClass()
 	delete[] VertexBuffer;
 }
 
+// Phase 5h.14/15 — `#include "dx8caps.h"` and `"thread.h"` are now pulled in
+// above the guard because DX8VertexBufferClass's methods (now unguarded)
+// reference `DX8Wrapper::Get_Current_Caps()->Support_TnL()` and
+// `DX8_THREAD_ASSERT`. Both resolve cleanly in bgfx mode (the methods are
+// inline header code; `CurrentCaps` is a nullptr-initialized static).
+#include "dx8caps.h"
+#include "thread.h"
+
+// Phase 5h.16 — Dynamic pool statics + VERTEX_BUFFER_LOG counter now compile
+// in both modes (all Dynamic*AccessClass methods that use them also compile
+// in bgfx since their DX8-API deps are covered by the compat shim + stub
+// functions). VERTEX_BUFFER_LOG is off by default, so the counter's only
+// read/write path is inert in release builds.
+#define DEFAULT_VB_SIZE 5000
+
+static bool _DynamicSortingVertexArrayInUse=false;
+//static VertexFormatXYZNDUV2* _DynamicSortingVertexArray=nullptr;
+static SortingVertexBufferClass* _DynamicSortingVertexArray=nullptr;
+static unsigned short _DynamicSortingVertexArraySize=0;
+static unsigned short _DynamicSortingVertexArrayOffset=0;
+
+static bool _DynamicDX8VertexBufferInUse=false;
+static DX8VertexBufferClass* _DynamicDX8VertexBuffer=nullptr;
+static unsigned short _DynamicDX8VertexBufferSize=DEFAULT_VB_SIZE;
+static unsigned short _DynamicDX8VertexBufferOffset=0;
+
+static const FVFInfoClass _DynamicFVFInfo(dynamic_fvf_type);
+
+static int _DX8VertexBufferCount=0;
 
 // ----------------------------------------------------------------------------
 //
@@ -405,6 +435,9 @@ DX8VertexBufferClass::~DX8VertexBufferClass()
 	WWDEBUG_SAY(("Current vertex buffer count: %d",_DX8VertexBufferCount));
 #endif
 	VertexBuffer->Release();
+	// Phase 5h.18
+	delete[] m_cpuShadow;
+	m_cpuShadow = nullptr;
 }
 
 // ----------------------------------------------------------------------------
@@ -461,10 +494,16 @@ void DX8VertexBufferClass::Create_Vertex_Buffer(UsageType usage)
 	// Vertex buffer creation failed, so try releasing least used textures and flushing the mesh cache.
 
 	// Free all textures that haven't been used in the last 5 seconds
+	// Phase 5h.23 — TextureClass::Invalidate_Old_Unused_Textures now linkable
+	// in bgfx mode (null-guards Get_Instance()); the 5h.15 surgical #ifdef
+	// here is no longer needed. WW3D::_Invalidate_Mesh_Cache is still DX8-only;
+	// guard just that call.
 	TextureClass::Invalidate_Old_Unused_Textures(5000);
 
+#ifdef RTS_RENDERER_DX8
 	// Invalidate the mesh cache
 	WW3D::_Invalidate_Mesh_Cache();
+#endif
 
 	//@todo: Find some way to invalidate the textures too
 	ret = DX8Wrapper::_Get_D3D_Device8()->ResourceManagerDiscardBytes(0);
@@ -483,6 +522,12 @@ void DX8VertexBufferClass::Create_Vertex_Buffer(UsageType usage)
 
 	// If it still fails it is fatal
 	DX8_ErrorCode(ret);
+
+	// Phase 5h.18 — allocate CPU shadow once the size is known. Sized by the
+	// final FVF size; the VB's VertexCount is already locked in by the base
+	// class ctor. In DX8 mode this is never read (real GPU Lock returns
+	// actual memory); in bgfx mode it backs every Lock/Draw path.
+	m_cpuShadow = new unsigned char[FVF_Info().Get_FVF_Size() * VertexCount];
 
 	/* Old Code
 	DX8CALL(CreateVertexBuffer(
@@ -716,6 +761,11 @@ void DX8VertexBufferClass::Copy(const Vector3* loc, const Vector2* uv, const Vec
 //
 // ----------------------------------------------------------------------------
 
+// Phase 5h.16 — DynamicVBAccessClass now compiles in both modes. The
+// `Draw_Sorting_IB_VB` dependency flagged in 5h.15's doc was phantom: the
+// class doesn't actually call it. Remaining DX8 API surface (Lock/Unlock on
+// `IDirect3DVertexBuffer8`) is covered by compat-shim stubs, and
+// `NEW_REF(DX8VertexBufferClass, ...)` lands in the un-guarded ctors from 5h.15.
 DynamicVBAccessClass::DynamicVBAccessClass(unsigned t,unsigned fvf,unsigned short vertex_count_)
 	:
 	Type(t),
@@ -907,5 +957,4 @@ unsigned short DynamicVBAccessClass::Get_Default_Vertex_Count()
 {
 	return _DynamicDX8VertexBufferSize;
 }
-#endif // RTS_RENDERER_DX8
 

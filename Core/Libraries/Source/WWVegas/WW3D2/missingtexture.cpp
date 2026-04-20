@@ -18,6 +18,23 @@
 
 // 08/05/02 KM Texture class redesign
 #include "missingtexture.h"
+
+// Phase 5h.22 — the _MissingTexture pointer + its accessor live outside the
+// RTS_RENDERER_DX8 guard so TextureBaseClass::Is_Missing_Texture (which calls
+// _Get_Missing_Texture) links in bgfx mode. The pointer stays nullptr there
+// (nothing runs _Init to populate it); _Get_Missing_Texture returns that
+// nullptr without asserting. `Is_Missing_Texture` compares it against
+// D3DTexture — both nullptr in bgfx mode means the function reports every
+// texture as "missing", which is technically wrong but also unreachable at
+// runtime (no TextureClass is constructed in bgfx mode yet).
+static IDirect3DTexture8 * _MissingTexture = nullptr;
+
+IDirect3DTexture8* MissingTexture::_Get_Missing_Texture()
+{
+	if (_MissingTexture) _MissingTexture->AddRef();
+	return _MissingTexture;
+}
+
 #ifdef RTS_RENDERER_DX8
 #include "texture.h"
 #include "dx8wrapper.h"
@@ -29,15 +46,6 @@ static unsigned missing_image_depth=24;
 
 extern unsigned int missing_image_palette[];
 extern unsigned int missing_image_pixels[];
-
-static IDirect3DTexture8 * _MissingTexture = nullptr;
-
-IDirect3DTexture8* MissingTexture::_Get_Missing_Texture()
-{
-	WWASSERT(_MissingTexture);
-	_MissingTexture->AddRef();
-	return _MissingTexture;
-}
 
 IDirect3DSurface8* MissingTexture::_Create_Missing_Surface()
 {

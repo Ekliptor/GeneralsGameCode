@@ -175,8 +175,12 @@ public:
 
 	IDirect3DIndexBuffer8* Get_DX8_Index_Buffer()	{ return index_buffer; }
 
+	// Phase 5h.18 — CPU-side shadow buffer; see dx8vertexbuffer.h for rationale.
+	unsigned short* Get_Cpu_Shadow() { return m_cpuShadow; }
+
 private:
 	IDirect3DIndexBuffer8*	index_buffer;		// actual dx8 index buffer
+	unsigned short*			m_cpuShadow = nullptr;   // Phase 5h.18
 };
 
 

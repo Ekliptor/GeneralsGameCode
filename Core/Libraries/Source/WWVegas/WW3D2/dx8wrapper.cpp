@@ -4484,8 +4484,19 @@ WW3DFormat	DX8Wrapper::getBackBufferFormat()
 #include "BGFXDevice/Common/BgfxBootstrap.h"
 #include "WW3D2/RenderBackendRuntime.h"
 #include "WW3D2/IRenderBackend.h"
+#include "WW3D2/BackendDescriptors.h"
+#include "vector3.h"
 #include "vector4.h"
 #include "matrix4.h"
+#include "light.h"
+#include "lightenvironment.h"
+#include "shader.h"
+#include "vertmaterial.h"
+#include "dx8vertexbuffer.h"
+#include "dx8indexbuffer.h"
+#include "dx8fvf.h"
+#include <algorithm>
+#include <cmath>
 
 namespace
 {
@@ -4503,6 +4514,14 @@ namespace
 		0.f, 0.f, 1.f, 0.f,
 		0.f, 0.f, 0.f, 1.f,
 	};
+
+	// Phase 5h.12 — forward declarations so Apply_Render_State_Changes can
+	// call into translators defined in the later anonymous namespace (the
+	// one that also holds TranslateLightType). Keeping the definitions
+	// grouped with the light helpers makes the translator layout symmetric.
+	ShaderStateDesc::DepthCmp    TranslateShaderDepthCmp(ShaderClass::DepthCompareType);
+	ShaderStateDesc::BlendFactor TranslateShaderSrcBlend(ShaderClass::SrcBlendFuncType);
+	ShaderStateDesc::BlendFactor TranslateShaderDstBlend(ShaderClass::DstBlendFuncType);
 }
 
 void Log_DX8_ErrorCode(unsigned) {}
@@ -4555,12 +4574,96 @@ void DX8Wrapper::Clear(bool clear_color, bool clear_z_stencil,
 		b->Clear(clear_color, clear_z_stencil, clearColor, z);
 	}
 }
-void DX8Wrapper::Set_Viewport(CONST D3DVIEWPORT8*) {}
+void DX8Wrapper::Set_Viewport(CONST D3DVIEWPORT8* pViewport)
+{
+	// Phase 5h.6 — translate the D3D8 viewport to the IRenderBackend rect.
+	// `pViewport == nullptr` is the game's "reset to default" convention — DX8
+	// would have passed the null straight through to SetViewport which picks
+	// the current RT size; we pass 0×0 to the backend, which handles the
+	// same meaning without the bgfx stub caching the backbuffer dims.
+	IRenderBackend* b = RenderBackendRuntime::Get_Active();
+	if (b == nullptr)
+		return;
+	if (pViewport == nullptr)
+	{
+		b->Set_Viewport(0, 0, 0, 0);
+		return;
+	}
+	b->Set_Viewport(
+		static_cast<int16_t>(pViewport->X),
+		static_cast<int16_t>(pViewport->Y),
+		static_cast<uint16_t>(pViewport->Width),
+		static_cast<uint16_t>(pViewport->Height));
+}
 
-void DX8Wrapper::Set_Vertex_Buffer(const VertexBufferClass*, unsigned) {}
-void DX8Wrapper::Set_Vertex_Buffer(const DynamicVBAccessClass&) {}
-void DX8Wrapper::Set_Index_Buffer(const IndexBufferClass*, unsigned short) {}
-void DX8Wrapper::Set_Index_Buffer(const DynamicIBAccessClass&, unsigned short) {}
+// Phase 5h.17 — Set_*_Buffer state tracking. The DX8 implementations at
+// dx8wrapper.cpp:1867 / 1893 / 1917 / 1941 are DX8-API-free (they just
+// manage render_state refcounts + dirty bits); cloned verbatim so the
+// bgfx-branch Draw_Triangles can read render_state.vertex_buffers[0] +
+// index_buffer back.
+void DX8Wrapper::Set_Vertex_Buffer(const VertexBufferClass* vb, unsigned stream)
+{
+	render_state.vba_offset=0;
+	render_state.vba_count=0;
+	if (render_state.vertex_buffers[stream]) {
+		render_state.vertex_buffers[stream]->Release_Engine_Ref();
+	}
+	REF_PTR_SET(render_state.vertex_buffers[stream],const_cast<VertexBufferClass*>(vb));
+	if (vb) {
+		vb->Add_Engine_Ref();
+		render_state.vertex_buffer_types[stream]=vb->Type();
+	}
+	else {
+		render_state.vertex_buffer_types[stream]=BUFFER_TYPE_INVALID;
+	}
+	render_state_changed|=VERTEX_BUFFER_CHANGED;
+}
+
+void DX8Wrapper::Set_Vertex_Buffer(const DynamicVBAccessClass& vba_)
+{
+	for (int i=1;i<MAX_VERTEX_STREAMS;++i) {
+		DX8Wrapper::Set_Vertex_Buffer(nullptr, i);
+	}
+	if (render_state.vertex_buffers[0]) render_state.vertex_buffers[0]->Release_Engine_Ref();
+	DynamicVBAccessClass& vba=const_cast<DynamicVBAccessClass&>(vba_);
+	render_state.vertex_buffer_types[0]=vba.Get_Type();
+	render_state.vba_offset=vba.VertexBufferOffset;
+	render_state.vba_count=vba.Get_Vertex_Count();
+	REF_PTR_SET(render_state.vertex_buffers[0],vba.VertexBuffer);
+	render_state.vertex_buffers[0]->Add_Engine_Ref();
+	render_state_changed|=VERTEX_BUFFER_CHANGED;
+	render_state_changed|=INDEX_BUFFER_CHANGED;
+}
+
+void DX8Wrapper::Set_Index_Buffer(const IndexBufferClass* ib, unsigned short index_base_offset)
+{
+	render_state.iba_offset=0;
+	if (render_state.index_buffer) {
+		render_state.index_buffer->Release_Engine_Ref();
+	}
+	REF_PTR_SET(render_state.index_buffer,const_cast<IndexBufferClass*>(ib));
+	render_state.index_base_offset=index_base_offset;
+	if (ib) {
+		ib->Add_Engine_Ref();
+		render_state.index_buffer_type=ib->Type();
+	}
+	else {
+		render_state.index_buffer_type=BUFFER_TYPE_INVALID;
+	}
+	render_state_changed|=INDEX_BUFFER_CHANGED;
+}
+
+void DX8Wrapper::Set_Index_Buffer(const DynamicIBAccessClass& iba_, unsigned short index_base_offset)
+{
+	if (render_state.index_buffer) render_state.index_buffer->Release_Engine_Ref();
+	DynamicIBAccessClass& iba=const_cast<DynamicIBAccessClass&>(iba_);
+	render_state.index_base_offset=index_base_offset;
+	render_state.index_buffer_type=iba.Get_Type();
+	render_state.iba_offset=iba.IndexBufferOffset;
+	REF_PTR_SET(render_state.index_buffer,iba.IndexBuffer);
+	render_state.index_buffer->Add_Engine_Ref();
+	render_state_changed|=INDEX_BUFFER_CHANGED;
+}
 
 // Methods already defined as inlines in dx8wrapper.h (with DX8CALL no-ops):
 // Get_Render_State, Set_Render_State, Release_Render_State,
@@ -4573,14 +4676,11 @@ void DX8Wrapper::Set_Gamma(float, float, float, bool, bool) {}
 
 void DX8Wrapper::Apply_Render_State_Changes()
 {
-	// Phase 5h.4 — push the pending world / view transforms down to the
-	// active bgfx backend. The inline Set_Transform path in dx8wrapper.h
-	// already captures these into `render_state.world/view` and sets the
-	// WORLD_CHANGED / VIEW_CHANGED bits; here's where DX8 would call
-	// DX8CALL(SetTransform(…)). In bgfx mode we map to Set_World_Transform
-	// / Set_View_Transform. Projection still goes through DX8CALL (no-op
-	// in bgfx stubs) — 5h.5 will add the projection + material / light /
-	// shader dispatch.
+	// Phase 5h.4/5/12 — drain cached render-state bits to the active bgfx
+	// backend. The inline Set_Transform / Set_Shader / Set_Material path in
+	// dx8wrapper.h captured each of these into render_state.* and set the
+	// matching dirty bit; here's where the DX8 path ran DX8CALL(…) and
+	// where the bgfx path publishes the equivalent descriptor.
 	IRenderBackend* b = RenderBackendRuntime::Get_Active();
 	if (b == nullptr)
 		return;
@@ -4594,13 +4694,64 @@ void DX8Wrapper::Apply_Render_State_Changes()
 		b->Set_View_Transform(reinterpret_cast<const float*>(&render_state.view));
 		render_state_changed &= ~VIEW_CHANGED;
 	}
-	// Phase 5h.5 — projection is captured in the inline Set_Transform's
-	// D3DTS_PROJECTION case; the bit is set there. The DX8 path ran its own
-	// DX8CALL(SetTransform); here we publish the same matrix to bgfx.
 	if (render_state_changed & PROJECTION_CHANGED)
 	{
 		b->Set_Projection_Transform(reinterpret_cast<const float*>(&render_state.projection));
 		render_state_changed &= ~PROJECTION_CHANGED;
+	}
+
+	// Phase 5h.12 — ShaderClass → ShaderStateDesc. ShaderClass is a 32-bit
+	// packed state; its getters are inline so the translation doesn't need
+	// `shader.cpp` linked (which is #ifdef'd out in bgfx mode). Every
+	// ShaderBits bitfield the uber-shader can honor is copied; those the
+	// backend can't express yet (detail-color/alpha funcs, NPatch, gradients,
+	// bumpenvmap) are dropped and will land with a future shader extension.
+	if (render_state_changed & SHADER_CHANGED)
+	{
+		const ShaderClass& s = render_state.shader;
+		ShaderStateDesc desc;
+		desc.depthCmp       = TranslateShaderDepthCmp(s.Get_Depth_Compare());
+		desc.depthWrite     = (s.Get_Depth_Mask() != ShaderClass::DEPTH_WRITE_DISABLE);
+		desc.colorWrite     = (s.Get_Color_Mask() != ShaderClass::COLOR_WRITE_DISABLE);
+		desc.cullEnable     = (s.Get_Cull_Mode() != ShaderClass::CULL_MODE_DISABLE);
+		desc.alphaTest      = (s.Get_Alpha_Test() != ShaderClass::ALPHATEST_DISABLE);
+		desc.texturingEnable = (s.Get_Texturing() != ShaderClass::TEXTURING_DISABLE);
+		desc.srcBlend       = TranslateShaderSrcBlend(s.Get_Src_Blend_Func());
+		desc.dstBlend       = TranslateShaderDstBlend(s.Get_Dst_Blend_Func());
+		// Phase 5o fog default comes from the shader's FogFuncType. FOG_DISABLE
+		// zeroes the enable flag; the fogStart/fogEnd/fogColor scene-globals
+		// are set elsewhere (ww3d::Set_Fog_Range) and remain cached in the
+		// backend from the previous upload.
+		desc.fogEnable      = (s.Get_Fog_Func() != ShaderClass::FOG_DISABLE);
+		b->Set_Shader(desc);
+		render_state_changed &= ~SHADER_CHANGED;
+	}
+
+	// Phase 5h.12 — VertexMaterialClass → MaterialDesc. VMC is compiled in
+	// bgfx-mode builds (vertmaterial.cpp has no RTS_RENDERER_DX8 guard) so
+	// all getters are linkable. A nullptr material maps to the default
+	// descriptor — the uber-shader's unlit solid/vcolor/tex paths still
+	// render correctly off that.
+	if (render_state_changed & MATERIAL_CHANGED)
+	{
+		MaterialDesc desc;
+		if (const VertexMaterialClass* m = render_state.material)
+		{
+			Vector3 v;
+			m->Get_Diffuse(&v);
+			desc.diffuse[0] = v.X; desc.diffuse[1] = v.Y; desc.diffuse[2] = v.Z;
+			m->Get_Ambient(&v);
+			desc.ambient[0] = v.X; desc.ambient[1] = v.Y; desc.ambient[2] = v.Z;
+			m->Get_Emissive(&v);
+			desc.emissive[0] = v.X; desc.emissive[1] = v.Y; desc.emissive[2] = v.Z;
+			m->Get_Specular(&v);
+			desc.specularColor[0] = v.X; desc.specularColor[1] = v.Y; desc.specularColor[2] = v.Z;
+			desc.specularPower = m->Get_Shininess();
+			desc.opacity       = m->Get_Opacity();
+			desc.useLighting   = m->Get_Lighting();
+		}
+		b->Set_Material(desc);
+		render_state_changed &= ~MATERIAL_CHANGED;
 	}
 }
 void DX8Wrapper::Apply_Default_State()
@@ -4616,13 +4767,426 @@ void DX8Wrapper::Apply_Default_State()
 	}
 }
 
-void DX8Wrapper::Set_Light(unsigned, const D3DLIGHT8*) {}
-void DX8Wrapper::Set_Light(unsigned, const LightClass&) {}
-void DX8Wrapper::Set_Light_Environment(LightEnvironmentClass* env) { Light_Environment = env; }
+// Phase 5h.7 — Set_Light translators. The bgfx backend carries `LightDesc`
+// in `IRenderBackend::Set_Light(index, const LightDesc*)`; passing nullptr
+// disables the slot. Both DX8 signatures end up funneling through a
+// LightDesc built from the same LightClass / D3DLIGHT8 inputs the DX8 path
+// would have stuffed into `render_state.Lights[index]`.
 
-void DX8Wrapper::Draw_Triangles(unsigned, unsigned short, unsigned short, unsigned short, unsigned short) {}
-void DX8Wrapper::Draw_Triangles(unsigned short, unsigned short, unsigned short, unsigned short) {}
-void DX8Wrapper::Draw_Strip(unsigned short, unsigned short, unsigned short, unsigned short) {}
+namespace
+{
+	// Phase 5h.12 — ShaderClass → ShaderStateDesc translators. Inline so
+	// the compiler can fold the switch for the common case.
+	ShaderStateDesc::DepthCmp TranslateShaderDepthCmp(ShaderClass::DepthCompareType d)
+	{
+		switch (d)
+		{
+		case ShaderClass::PASS_NEVER:    return ShaderStateDesc::DEPTH_NEVER;
+		case ShaderClass::PASS_LESS:     return ShaderStateDesc::DEPTH_LESS;
+		case ShaderClass::PASS_EQUAL:    return ShaderStateDesc::DEPTH_EQUAL;
+		case ShaderClass::PASS_LEQUAL:   return ShaderStateDesc::DEPTH_LEQUAL;
+		case ShaderClass::PASS_GREATER:  return ShaderStateDesc::DEPTH_GREATER;
+		case ShaderClass::PASS_NOTEQUAL: return ShaderStateDesc::DEPTH_NOTEQUAL;
+		case ShaderClass::PASS_GEQUAL:   return ShaderStateDesc::DEPTH_GEQUAL;
+		case ShaderClass::PASS_ALWAYS:   return ShaderStateDesc::DEPTH_ALWAYS;
+		}
+		return ShaderStateDesc::DEPTH_LEQUAL;
+	}
+
+	ShaderStateDesc::BlendFactor TranslateShaderSrcBlend(ShaderClass::SrcBlendFuncType s)
+	{
+		switch (s)
+		{
+		case ShaderClass::SRCBLEND_ZERO:                 return ShaderStateDesc::BLEND_ZERO;
+		case ShaderClass::SRCBLEND_ONE:                  return ShaderStateDesc::BLEND_ONE;
+		case ShaderClass::SRCBLEND_SRC_ALPHA:            return ShaderStateDesc::BLEND_SRC_ALPHA;
+		case ShaderClass::SRCBLEND_ONE_MINUS_SRC_ALPHA:  return ShaderStateDesc::BLEND_INV_SRC_ALPHA;
+		case ShaderClass::SRCBLEND_MAX:                  break;
+		}
+		return ShaderStateDesc::BLEND_ONE;
+	}
+
+	ShaderStateDesc::BlendFactor TranslateShaderDstBlend(ShaderClass::DstBlendFuncType d)
+	{
+		switch (d)
+		{
+		case ShaderClass::DSTBLEND_ZERO:                 return ShaderStateDesc::BLEND_ZERO;
+		case ShaderClass::DSTBLEND_ONE:                  return ShaderStateDesc::BLEND_ONE;
+		case ShaderClass::DSTBLEND_SRC_COLOR:            return ShaderStateDesc::BLEND_SRC_COLOR;
+		case ShaderClass::DSTBLEND_ONE_MINUS_SRC_COLOR:  return ShaderStateDesc::BLEND_INV_SRC_COLOR;
+		case ShaderClass::DSTBLEND_SRC_ALPHA:            return ShaderStateDesc::BLEND_SRC_ALPHA;
+		case ShaderClass::DSTBLEND_ONE_MINUS_SRC_ALPHA:  return ShaderStateDesc::BLEND_INV_SRC_ALPHA;
+		case ShaderClass::DSTBLEND_MAX:                  break;
+		}
+		return ShaderStateDesc::BLEND_ZERO;
+	}
+
+	LightDesc::Type TranslateLightType(LightClass::LightType t)
+	{
+		switch (t)
+		{
+		case LightClass::POINT:       return LightDesc::LIGHT_POINT;
+		case LightClass::DIRECTIONAL: return LightDesc::LIGHT_DIRECTIONAL;
+		case LightClass::SPOT:        return LightDesc::LIGHT_SPOT;
+		}
+		return LightDesc::LIGHT_DIRECTIONAL;
+	}
+
+	LightDesc::Type TranslateLightType(D3DLIGHTTYPE t)
+	{
+		switch (t)
+		{
+		case D3DLIGHT_POINT:       return LightDesc::LIGHT_POINT;
+		case D3DLIGHT_DIRECTIONAL: return LightDesc::LIGHT_DIRECTIONAL;
+		case D3DLIGHT_SPOT:        return LightDesc::LIGHT_SPOT;
+		}
+		return LightDesc::LIGHT_DIRECTIONAL;
+	}
+
+	float LuminanceOf(const Vector3& v)
+	{
+		// Rec. 709; the LightDesc ambient slot is scalar, so collapse the
+		// LightClass ambient Vector3 to a single intensity the uber-shader
+		// can add as a scene-global term.
+		return 0.2126f * v.X + 0.7152f * v.Y + 0.0722f * v.Z;
+	}
+}
+
+void DX8Wrapper::Set_Light(unsigned index, const D3DLIGHT8* light)
+{
+	IRenderBackend* b = RenderBackendRuntime::Get_Active();
+	if (b == nullptr)
+		return;
+	if (light == nullptr)
+	{
+		b->Set_Light(index, nullptr);
+		return;
+	}
+	LightDesc desc;
+	desc.type            = TranslateLightType(light->Type);
+	desc.direction[0]    = light->Direction.x;
+	desc.direction[1]    = light->Direction.y;
+	desc.direction[2]    = light->Direction.z;
+	desc.color[0]        = light->Diffuse.r;
+	desc.color[1]        = light->Diffuse.g;
+	desc.color[2]        = light->Diffuse.b;
+	desc.specular[0]     = light->Specular.r;
+	desc.specular[1]     = light->Specular.g;
+	desc.specular[2]     = light->Specular.b;
+	// D3DCOLORVALUE is already a scalar-per-channel 0..1 term; fold to
+	// luminance for the scalar ambient slot the descriptor carries.
+	desc.ambient         = 0.2126f * light->Ambient.r
+	                     + 0.7152f * light->Ambient.g
+	                     + 0.0722f * light->Ambient.b;
+	desc.intensity       = 1.0f;   // D3DLIGHT8 has no separate intensity field
+	desc.position[0]     = light->Position.x;
+	desc.position[1]     = light->Position.y;
+	desc.position[2]     = light->Position.z;
+	desc.attenuationRange = light->Range;
+	// Phase 5h.10 — spot cone. D3DLIGHT8 Theta/Phi are FULL cone angles in
+	// radians (Theta = inner, Phi = outer); the descriptor wants cos(half).
+	if (light->Type == D3DLIGHT_SPOT)
+	{
+		desc.spotDirection[0] = light->Direction.x;
+		desc.spotDirection[1] = light->Direction.y;
+		desc.spotDirection[2] = light->Direction.z;
+		desc.spotInnerCos     = std::cos(light->Theta * 0.5f);
+		desc.spotOuterCos     = std::cos(light->Phi   * 0.5f);
+	}
+	b->Set_Light(index, &desc);
+}
+
+void DX8Wrapper::Set_Light(unsigned index, const LightClass& light)
+{
+	IRenderBackend* b = RenderBackendRuntime::Get_Active();
+	if (b == nullptr)
+		return;
+	LightDesc desc;
+	desc.type = TranslateLightType(light.Get_Type());
+
+	Vector3 diffuse;
+	light.Get_Diffuse(&diffuse);
+	const float intensity = light.Get_Intensity();
+	desc.color[0]    = diffuse.X * intensity;
+	desc.color[1]    = diffuse.Y * intensity;
+	desc.color[2]    = diffuse.Z * intensity;
+	desc.intensity   = intensity;
+
+	Vector3 ambient;
+	light.Get_Ambient(&ambient);
+	desc.ambient = LuminanceOf(ambient) * intensity;
+
+	Vector3 spec;
+	light.Get_Specular(&spec);
+	desc.specular[0] = spec.X * intensity;
+	desc.specular[1] = spec.Y * intensity;
+	desc.specular[2] = spec.Z * intensity;
+
+	const Vector3 pos = light.Get_Position();
+	desc.position[0] = pos.X;
+	desc.position[1] = pos.Y;
+	desc.position[2] = pos.Z;
+
+	Vector3 dir;
+	light.Get_Spot_Direction(dir);
+	desc.direction[0] = dir.X;
+	desc.direction[1] = dir.Y;
+	desc.direction[2] = dir.Z;
+
+	desc.attenuationRange = light.Get_Attenuation_Range();
+
+	// Phase 5h.10 — spot cone. LightClass stores one half-angle cos
+	// (`Get_Spot_Angle_Cos`); emulate a soft edge by shrinking the inner
+	// cone 0.04 cos (~5° off-axis) while keeping it tighter than the
+	// outer.
+	if (light.Get_Type() == LightClass::SPOT)
+	{
+		desc.spotDirection[0] = dir.X;
+		desc.spotDirection[1] = dir.Y;
+		desc.spotDirection[2] = dir.Z;
+		const float outerCos = light.Get_Spot_Angle_Cos();
+		desc.spotOuterCos = outerCos;
+		desc.spotInnerCos = std::min(outerCos + 0.04f, 0.9999f);
+	}
+
+	b->Set_Light(index, &desc);
+}
+
+void DX8Wrapper::Set_Light_Environment(LightEnvironmentClass* env)
+{
+	// Phase 5h.8 — full iteration. The DX8 body at dx8wrapper.cpp:3065 walks
+	// env->Get_Light_Count() building RenderLight entries; the bgfx branch
+	// mirrors that but emits LightDesc directly to the backend. Scene-global
+	// ambient is collapsed to a scalar and folded into slot 0's ambient term
+	// (the uber-shader's per-slot ambient accumulator already folds slot 0's
+	// ambient as the global term, matching how `tst_bgfx_multilight` drives
+	// lighting). Slots past Get_Light_Count() up to kMaxBackendLights are
+	// explicitly disabled each frame so stale state from a prior object's
+	// env doesn't leak into the next draw.
+
+	Light_Environment = env;
+
+	IRenderBackend* b = RenderBackendRuntime::Get_Active();
+	if (b == nullptr)
+		return;
+
+	// Both LightEnvironmentClass::MAX_LIGHTS and the backend's slot count are
+	// 4 by design; keep this literal so the mismatch surfaces loudly if either
+	// changes.
+	constexpr unsigned kMaxBackendLights = 4;
+
+	if (env == nullptr)
+	{
+		for (unsigned i = 0; i < kMaxBackendLights; ++i)
+			b->Set_Light(i, nullptr);
+		return;
+	}
+
+	const int lightCount = env->Get_Light_Count();
+	const Vector3 sceneAmbient = env->Get_Equivalent_Ambient();
+	const float ambientScalar = LuminanceOf(sceneAmbient);
+
+	for (int i = 0; i < lightCount && i < int(kMaxBackendLights); ++i)
+	{
+		LightDesc desc;
+		if (env->isPointLight(i))
+		{
+			desc.type        = LightDesc::LIGHT_POINT;
+			const Vector3& d = env->getPointDiffuse(i);
+			const Vector3& a = env->getPointAmbient(i);
+			const Vector3& c = env->getPointCenter(i);
+			desc.color[0]       = d.X;
+			desc.color[1]       = d.Y;
+			desc.color[2]       = d.Z;
+			desc.position[0]    = c.X;
+			desc.position[1]    = c.Y;
+			desc.position[2]    = c.Z;
+			desc.attenuationRange = env->getPointOrad(i);
+			desc.ambient        = LuminanceOf(a);
+		}
+		else
+		{
+			desc.type = LightDesc::LIGHT_DIRECTIONAL;
+			const Vector3& d   = env->Get_Light_Diffuse(i);
+			// LightEnvironmentClass stores the light-to-object direction; the
+			// DX8 body at dx8wrapper.cpp:3091 negates it to get the
+			// conventional "direction light points toward surface". The bgfx
+			// shader expects the same sense.
+			const Vector3  dir = -env->Get_Light_Direction(i);
+			desc.color[0] = d.X;
+			desc.color[1] = d.Y;
+			desc.color[2] = d.Z;
+			desc.direction[0] = dir.X;
+			desc.direction[1] = dir.Y;
+			desc.direction[2] = dir.Z;
+			desc.ambient      = 0.0f;
+		}
+		if (i == 0)
+		{
+			desc.ambient += ambientScalar;   // fold scene-ambient into slot 0
+			// Phase 5h.11 — mirror the DX8 body's slot-0 hardcoded specular
+			// (dx8wrapper.cpp:3095 inside the DX8 branch). Keeps DX8 and
+			// bgfx renderings of LightEnvironment-lit objects consistent.
+			desc.specular[0] = 1.0f;
+			desc.specular[1] = 1.0f;
+			desc.specular[2] = 1.0f;
+		}
+		desc.intensity = 1.0f;
+		b->Set_Light(static_cast<unsigned>(i), &desc);
+	}
+
+	// Disable trailing slots so stale state doesn't leak from a prior env.
+	for (unsigned i = static_cast<unsigned>(lightCount); i < kMaxBackendLights; ++i)
+		b->Set_Light(i, nullptr);
+}
+
+// Phase 5h.17/18 — Draw_Triangles bgfx path. Routes both sorting-type VBs
+// (which carry a native VertexFormatXYZNDUV2 CPU payload) and DX8-type VBs
+// (which carry a byte-oriented CPU shadow filled via Lock's fallback). The
+// FVF → VertexLayoutDesc translator below handles every FVF combination the
+// game actually uses; unknown FVFs fall through to "no attributes" and the
+// draw silently drops.
+namespace
+{
+	// Phase 5h.17 — sorting pool is hard-wired to VertexFormatXYZNDUV2
+	// (see SortingVertexBufferClass's ctor).
+	void FillSortingLayout(VertexLayoutDesc& d)
+	{
+		d.stride    = sizeof(VertexFormatXYZNDUV2);
+		d.attrCount = 5;
+		d.attrs[0] = { VertexAttributeDesc::SEM_POSITION,  VertexAttributeDesc::TYPE_FLOAT32,          3, 0, offsetof(VertexFormatXYZNDUV2, x)       };
+		d.attrs[1] = { VertexAttributeDesc::SEM_NORMAL,    VertexAttributeDesc::TYPE_FLOAT32,          3, 0, offsetof(VertexFormatXYZNDUV2, nx)      };
+		d.attrs[2] = { VertexAttributeDesc::SEM_COLOR0,    VertexAttributeDesc::TYPE_UINT8_NORMALIZED, 4, 0, offsetof(VertexFormatXYZNDUV2, diffuse) };
+		d.attrs[3] = { VertexAttributeDesc::SEM_TEXCOORD0, VertexAttributeDesc::TYPE_FLOAT32,          2, 0, offsetof(VertexFormatXYZNDUV2, u1)      };
+		d.attrs[4] = { VertexAttributeDesc::SEM_TEXCOORD1, VertexAttributeDesc::TYPE_FLOAT32,          2, 0, offsetof(VertexFormatXYZNDUV2, u2)      };
+	}
+
+	// Phase 5h.18 — translate a D3DFVF bitmask to a VertexLayoutDesc. The
+	// engine's FVF combinations (per `dx8fvf.h` VertexFormatXYZ* structs) pack
+	// attributes in a fixed order: position → normal → color → uv0 → uv1 →
+	// uv2 → uv3. The stride is whatever `FVFInfoClass::Get_FVF_Size()` reports
+	// the game computed for the FVF, so we accept it as input rather than
+	// reconstructing it.
+	bool FillLayoutFromFVF(VertexLayoutDesc& d, unsigned fvf, unsigned stride)
+	{
+		d = VertexLayoutDesc{};
+		d.stride = static_cast<uint16_t>(stride);
+		unsigned off = 0;
+		auto add = [&d, &off](VertexAttributeDesc::Semantic sem,
+		                     VertexAttributeDesc::Type type,
+		                     uint8_t count, unsigned bytes) {
+			if (d.attrCount >= VertexLayoutDesc::kMaxAttrs) return;
+			d.attrs[d.attrCount++] = { sem, type, count, 0, static_cast<uint16_t>(off) };
+			off += bytes;
+		};
+
+		// D3DFVF_XYZ is the only position mode the game emits; D3DFVF_XYZRHW
+		// (pre-transformed verts) isn't used by any mesh path — if we see it,
+		// fail out so the caller drops the draw rather than misinterpreting.
+		if ((fvf & D3DFVF_POSITION_MASK) != D3DFVF_XYZ)
+			return false;
+		add(VertexAttributeDesc::SEM_POSITION, VertexAttributeDesc::TYPE_FLOAT32, 3, sizeof(float) * 3);
+
+		if (fvf & D3DFVF_NORMAL)
+			add(VertexAttributeDesc::SEM_NORMAL, VertexAttributeDesc::TYPE_FLOAT32, 3, sizeof(float) * 3);
+		if (fvf & D3DFVF_DIFFUSE)
+			add(VertexAttributeDesc::SEM_COLOR0, VertexAttributeDesc::TYPE_UINT8_NORMALIZED, 4, sizeof(unsigned));
+		if (fvf & D3DFVF_SPECULAR)
+			off += sizeof(unsigned);   // skip specular (no shader slot today)
+
+		const unsigned texN = (fvf & D3DFVF_TEXCOUNT_MASK) >> D3DFVF_TEXCOUNT_SHIFT;
+		if (texN >= 1) add(VertexAttributeDesc::SEM_TEXCOORD0, VertexAttributeDesc::TYPE_FLOAT32, 2, sizeof(float) * 2);
+		if (texN >= 2) add(VertexAttributeDesc::SEM_TEXCOORD1, VertexAttributeDesc::TYPE_FLOAT32, 2, sizeof(float) * 2);
+		if (texN >= 3) off += sizeof(float) * 2;   // UV2 unused by the uber-shader
+		if (texN >= 4) off += sizeof(float) * 2;   // UV3
+
+		// Sanity: computed offset should match the reported stride.
+		return (off == stride);
+	}
+}
+
+void DX8Wrapper::Draw_Triangles(unsigned /*buffer_type*/,
+                                 unsigned short start_index,
+                                 unsigned short polygon_count,
+                                 unsigned short min_vertex_index,
+                                 unsigned short vertex_count)
+{
+	// Route through the 4-arg overload; the bgfx path doesn't distinguish
+	// sorting from non-sorting at the draw layer (the state's VB/IB types
+	// already decide how to extract payloads).
+	Draw_Triangles(start_index, polygon_count, min_vertex_index, vertex_count);
+}
+
+void DX8Wrapper::Draw_Triangles(unsigned short start_index,
+                                 unsigned short polygon_count,
+                                 unsigned short min_vertex_index,
+                                 unsigned short vertex_count)
+{
+	IRenderBackend* b = RenderBackendRuntime::Get_Active();
+	if (b == nullptr)
+		return;
+
+	Apply_Render_State_Changes();
+
+	VertexBufferClass* vb = render_state.vertex_buffers[0];
+	IndexBufferClass*  ib = render_state.index_buffer;
+	if (vb == nullptr || ib == nullptr)
+		return;
+
+	const unsigned vbType = vb->Type();
+	const unsigned ibType = ib->Type();
+
+	// Resolve the CPU-side vertex payload + stride + FVF-derived layout.
+	// Sorting types carry a native VertexFormatXYZNDUV2 array; DX8 types
+	// carry a byte-oriented shadow filled via the Lock fallback (Phase 5h.18).
+	const uint8_t* vertBytes = nullptr;
+	unsigned       stride    = 0;
+	VertexLayoutDesc layout;
+	bool layoutOk = false;
+
+	if (vbType == BUFFER_TYPE_SORTING || vbType == BUFFER_TYPE_DYNAMIC_SORTING)
+	{
+		auto* sortVB = static_cast<SortingVertexBufferClass*>(vb);
+		vertBytes = reinterpret_cast<const uint8_t*>(sortVB->VertexBuffer);
+		stride    = sizeof(VertexFormatXYZNDUV2);
+		FillSortingLayout(layout);
+		layoutOk  = (vertBytes != nullptr);
+	}
+	else if (vbType == BUFFER_TYPE_DX8 || vbType == BUFFER_TYPE_DYNAMIC_DX8)
+	{
+		auto* dxVB = static_cast<DX8VertexBufferClass*>(vb);
+		vertBytes = dxVB->Get_Cpu_Shadow();
+		stride    = vb->FVF_Info().Get_FVF_Size();
+		layoutOk  = (vertBytes != nullptr) &&
+		            FillLayoutFromFVF(layout, vb->FVF_Info().Get_FVF(), stride);
+	}
+	if (!layoutOk)
+		return;
+
+	// Resolve indices: either sorting's native CPU array or the DX8 subclass's
+	// shadow. Apply iba_offset + start_index the same way both code paths do.
+	const unsigned short* inds = nullptr;
+	if (ibType == BUFFER_TYPE_SORTING || ibType == BUFFER_TYPE_DYNAMIC_SORTING)
+		inds = static_cast<SortingIndexBufferClass*>(ib)->index_buffer;
+	else if (ibType == BUFFER_TYPE_DX8 || ibType == BUFFER_TYPE_DYNAMIC_DX8)
+		inds = static_cast<DX8IndexBufferClass*>(ib)->Get_Cpu_Shadow();
+	if (inds == nullptr)
+		return;
+
+	const unsigned short* firstIdx = inds + render_state.iba_offset + start_index;
+	const uint8_t*        firstVert = vertBytes + (render_state.vba_offset + min_vertex_index) * stride;
+
+	b->Draw_Triangles_Dynamic(firstVert, vertex_count, layout, firstIdx, polygon_count * 3);
+}
+
+void DX8Wrapper::Draw_Strip(unsigned short, unsigned short, unsigned short, unsigned short)
+{
+	// Phase 5h.17 — triangle-strip routing deferred. The uber-shader expects
+	// triangle-list primitives, and the main game draw path uses
+	// Draw_Triangles for mesh geometry (strips are used only by a few
+	// particle passes). Adding a strip code path can wait for a strip-heavy
+	// renderer surface to need it.
+}
 void DX8Wrapper::Draw_Sorting_IB_VB(unsigned, unsigned short, unsigned short, unsigned short, unsigned short) {}
 void DX8Wrapper::Draw(unsigned, unsigned short, unsigned short, unsigned short, unsigned short) {}
 

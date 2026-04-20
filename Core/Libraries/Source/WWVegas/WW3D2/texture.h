@@ -207,6 +207,20 @@ public:
 	// Opaque uintptr_t so texture.h stays independent of BGFXDevice headers.
 	uintptr_t Peek_Bgfx_Handle() const { return BgfxTexture; }
 
+	// Phase 5h.27 — setter for the handle. Called from TextureClass::Init's
+	// bgfx branch after BgfxTextureCache::Get_Or_Load_File. Kept public
+	// (rather than protected + friend) so the bgfx-mode stubs can live in
+	// texture.cpp as normal non-member-of-friend code.
+	void Set_Bgfx_Handle(uintptr_t h) { BgfxTexture = h; }
+
+	// Phase 5h.29 — render-target companion handle. BgfxTexture holds the
+	// *sampler* handle (what Set_Texture binds); BgfxRenderTarget holds the
+	// RT handle itself (what Set_Render_Target binds + Destroy_Render_Target
+	// releases). A value of 0 means the texture is not an RT — which covers
+	// every file-loaded and non-RT procedural texture.
+	uintptr_t Peek_Bgfx_Render_Target() const { return BgfxRenderTarget; }
+	void      Set_Bgfx_Render_Target(uintptr_t h) { BgfxRenderTarget = h; }
+
 protected:
 
 	void Load_Locked_Surface();
@@ -244,6 +258,12 @@ private:
 	// Declared here rather than only in bgfx builds so the class layout is
 	// stable between DX8 and bgfx configurations.
 	uintptr_t BgfxTexture = 0;
+
+	// Phase 5h.29 — opaque bgfx render-target handle (Create_Render_Target)
+	// for textures marked rendertarget=true. Separate from BgfxTexture so
+	// Set_Render_Target can bind the RT while Set_Texture binds the sampler
+	// handle produced by Get_Render_Target_Texture.
+	uintptr_t BgfxRenderTarget = 0;
 
 	// Name
 	StringClass Name;

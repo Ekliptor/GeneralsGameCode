@@ -78,6 +78,14 @@
  * - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
 #include "assetmgr.h"
+
+// Phase 5h.23 — singleton pointer moved above the guard so Get_Instance() is
+// callable from bgfx-mode code (the TextureBaseClass accounting methods
+// iterate WW3DAssetManager's texture hash). TheInstance stays nullptr in
+// bgfx mode since nothing constructs a WW3DAssetManager there; callers must
+// null-check before dereferencing, which the new bgfx-path texture methods do.
+WW3DAssetManager *		WW3DAssetManager::TheInstance = nullptr;
+
 #ifdef RTS_RENDERER_DX8
 #include <assert.h>
 
@@ -120,10 +128,7 @@
 
 #include "shdlib.h"
 
-/*
-** Static member variable which keeps track of the single instanced asset manager
-*/
-WW3DAssetManager *		WW3DAssetManager::TheInstance = nullptr;
+// Phase 5h.23 — TheInstance moved above the guard.
 
 /*
 ** Static instance of the Null prototype.  This render object is special cased

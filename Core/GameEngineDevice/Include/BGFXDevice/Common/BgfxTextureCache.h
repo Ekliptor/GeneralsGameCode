@@ -25,11 +25,14 @@
 // Lifetime:
 //   * Handles are owned by the backend (via Phase 5j's `m_ownedTextures`).
 //     The cache holds `uintptr_t`s that point into that tracking list.
-//   * `Release` drops one path → the handle is `Destroy_Texture`-d and
-//     removed from the map.
-//   * `Clear_All` drops everything. `BgfxBootstrap::Shutdown` calls this
-//     *before* the backend itself goes down so `Destroy_Texture` still
-//     has a live backend.
+//   * Phase 5h.33 — entries are refcounted. `Get_Or_Load_File`
+//     increments the refcount; `Release` decrements it. The handle is
+//     only `Destroy_Texture`-d and removed from the map when the
+//     refcount hits zero. This lets multiple `TextureClass` instances
+//     safely share a single file-backed handle.
+//   * `Clear_All` drops everything regardless of refcount.
+//     `BgfxBootstrap::Shutdown` calls this *before* the backend itself
+//     goes down so `Destroy_Texture` still has a live backend.
 //
 // Thread safety: none. Texture loads happen on the main thread in
 // Generals; if that ever changes, add a mutex.
@@ -45,14 +48,21 @@ namespace BgfxTextureCache
 	// Subsequent calls with the same path return the cached handle.
 	uintptr_t Get_Or_Load_File(const char* path);
 
-	// Drops a single path + destroys the underlying bgfx texture.
-	// No-op if the path isn't cached.
+	// Decrements the path's refcount. When the refcount reaches zero
+	// the underlying bgfx texture is `Destroy_Texture`-d and the entry
+	// is removed from the map. No-op if the path isn't cached.
 	void Release(const char* path);
 
-	// Drops every entry + destroys every underlying bgfx texture.
-	// Invoked by BgfxBootstrap::Shutdown before the backend goes down.
+	// Drops every entry + destroys every underlying bgfx texture,
+	// regardless of refcount. Invoked by BgfxBootstrap::Shutdown
+	// before the backend goes down.
 	void Clear_All();
 
 	// Diagnostic: number of currently-cached entries.
 	std::size_t Size();
+
+	// Diagnostic: current refcount for `path`. Returns 0 if the path
+	// isn't cached (indistinguishable from "cached but refcount==0",
+	// which shouldn't happen since a zero refcount triggers removal).
+	unsigned Ref_Count(const char* path);
 }

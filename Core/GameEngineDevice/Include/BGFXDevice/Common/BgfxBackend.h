@@ -22,6 +22,7 @@
 #include "WW3D2/BackendDescriptors.h"
 
 #include <bgfx/bgfx.h>
+#include <unordered_map>
 #include <vector>
 
 class BgfxBackend final : public IRenderBackend
@@ -51,13 +52,19 @@ public:
 	                               uint16_t height,
 	                               bool mipmap) override;
 	uintptr_t Create_Texture_From_Memory(const void* data, uint32_t size) override;
+	void Update_Texture_RGBA8(uintptr_t handle, const void* pixels, uint16_t width, uint16_t height) override;
 	void Destroy_Texture(uintptr_t handle) override;
 	void Set_Texture(unsigned stage, uintptr_t handle) override;
+	void Set_Sampler_State(unsigned stage, const SamplerStateDesc& sampler) override;
+	uint8_t Texture_Mip_Count(uintptr_t handle) override;
 
 	void Set_Vertex_Buffer(const void* data,
 	                       unsigned vertexCount,
 	                       const VertexLayoutDesc& layout) override;
 	void Set_Index_Buffer(const uint16_t* data, unsigned indexCount) override;
+
+	void Set_Viewport(int16_t x, int16_t y,
+	                  uint16_t width, uint16_t height) override;
 
 	void Draw_Indexed(unsigned minVertexIndex, unsigned numVertices,
 	                  unsigned startIndex, unsigned primitiveCount) override;
@@ -142,6 +149,10 @@ private:
 	bgfx::UniformHandle m_uSampler1      = BGFX_INVALID_HANDLE;  // Phase 5k: stage-1 sampler
 	bgfx::UniformHandle m_uLightDirArr   = BGFX_INVALID_HANDLE;  // Phase 5l: vec4[kMaxLights]
 	bgfx::UniformHandle m_uLightColorArr = BGFX_INVALID_HANDLE;  // Phase 5l: vec4[kMaxLights]
+	bgfx::UniformHandle m_uLightPosArr   = BGFX_INVALID_HANDLE;  // Phase 5h.9: vec4[kMaxLights] xyz=pos, w=range(0=directional)
+	bgfx::UniformHandle m_uLightSpotArr  = BGFX_INVALID_HANDLE;  // Phase 5h.10: vec4[kMaxLights] xyz=spotDir, w=outerCos(<0=not spot)
+	bgfx::UniformHandle m_uLightSpecArr  = BGFX_INVALID_HANDLE;  // Phase 5h.11: vec4[kMaxLights] rgb=per-light specular color
+	bgfx::UniformHandle m_uMaterialSpec  = BGFX_INVALID_HANDLE;  // Phase 5h.11: vec4 rgb=matSpec, w=power
 	bgfx::UniformHandle m_uCutoutRef     = BGFX_INVALID_HANDLE;  // Phase 5n: .x = cutout threshold (u_cutoutRef)
 	bgfx::UniformHandle m_uFogColor      = BGFX_INVALID_HANDLE;  // Phase 5o: rgb fog color
 	bgfx::UniformHandle m_uFogRange      = BGFX_INVALID_HANDLE;  // Phase 5o: .x=start, .y=end, .z=enable
@@ -188,8 +199,24 @@ private:
 	// `m_stageTexture` holds the currently-bound handle per texture stage;
 	// 0 means "use the built-in placeholder".
 	std::vector<bgfx::TextureHandle*> m_ownedTextures;
+
+	// Phase 5h.36 — mip-level count per owned texture. Populated by
+	// `Create_Texture_RGBA8` (0 mips → 1 level, mipmap=true → runtime-genned,
+	// value stored is the level count bgfx will have) and
+	// `Create_Texture_From_Memory` (reads `bimg::ImageContainer::m_numMips`).
+	// Removed on `Destroy_Texture`. Consumed by `Texture_Mip_Count` so
+	// callers can demote their sampler mip filter when the file on disk
+	// didn't actually carry a mip chain.
+	std::unordered_map<uintptr_t, uint8_t> m_textureMipCounts;
+
 	static constexpr unsigned kMaxTextureStages = 2;
 	uintptr_t m_stageTexture[kMaxTextureStages] = { 0, 0 };
+
+	// Phase 5h.34 — per-stage sampler flags in bgfx's native format. Computed
+	// once per Set_Sampler_State call and OR-ed into `setTexture` at submit
+	// time. Default is "bilinear + wrap" which matches the filter/addr
+	// defaults used before 5h.34.
+	uint32_t  m_stageSamplerFlags[kMaxTextureStages] = { 0, 0 };
 
 	// Phase 5p — off-screen render targets. Each RT owns a bgfx FrameBuffer
 	// and a dedicated view ID; the backbuffer keeps view 0. Inside

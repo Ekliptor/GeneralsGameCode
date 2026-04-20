@@ -29,6 +29,7 @@ struct ShaderStateDesc;
 struct MaterialDesc;
 struct LightDesc;
 struct VertexLayoutDesc;
+struct SamplerStateDesc;
 
 class IRenderBackend
 {
@@ -78,8 +79,34 @@ public:
 	virtual uintptr_t Create_Texture_From_Memory(const void* data,
 	                                             uint32_t size) = 0;
 
+	// Phase 5h.30. Uploads fresh RGBA8 pixels to an existing texture at
+	// mip level 0. Intended for procedural textures allocated via
+	// `Create_Texture_RGBA8(nullptr, w, h, …)` (Phase 5h.28) that later
+	// need real pixel data. `handle == 0` is a no-op (simplifies callers
+	// that may hold an unallocated handle). `pixels` must point to at
+	// least `w * h * 4` bytes; partial updates aren't exposed yet.
+	virtual void Update_Texture_RGBA8(uintptr_t handle,
+	                                  const void* pixels,
+	                                  uint16_t width,
+	                                  uint16_t height) = 0;
+
 	virtual void Destroy_Texture(uintptr_t handle) = 0;
 	virtual void Set_Texture(unsigned stage, uintptr_t handle) = 0;
+
+	// Phase 5h.36 — diagnostic mip-count accessor for cache-loaded textures.
+	// Returns the number of mip levels the texture was created with
+	// (1 == no mip chain; >1 == pre-baked mips). Returns 0 if the handle
+	// isn't known to the backend. Lets `TextureClass` / `TextureFilterClass`
+	// reconcile their ctor-time "I want mips" preference with what the file
+	// on disk actually provided.
+	virtual uint8_t Texture_Mip_Count(uintptr_t handle) = 0;
+
+	// Phase 5h.34 — per-stage sampler state (filter + address mode +
+	// anisotropy). Cached inside the backend and applied on the next
+	// `Set_Texture` / draw submission. Called by `TextureFilterClass::Apply`
+	// in bgfx mode. Defaults (bilinear / wrap / no-mips) are applied to any
+	// stage that was never configured.
+	virtual void Set_Sampler_State(unsigned stage, const SamplerStateDesc& sampler) = 0;
 
 	// Resource binding — ownership stays with the backend: a subsequent
 	// Set_* call or Shutdown() releases the previously bound buffer.
@@ -88,6 +115,15 @@ public:
 	                               const VertexLayoutDesc& layout) = 0;
 	virtual void Set_Index_Buffer(const uint16_t* data,
 	                              unsigned indexCount) = 0;
+
+	// Phase 5h.6 — viewport scissor/origin. Origin is top-left pixel of the
+	// current render target (backbuffer or RT), `width`/`height` in pixels.
+	// Passing `width == 0 || height == 0` resets the viewport to cover the
+	// full current target — useful after a capture-only RT draw where the
+	// game wants to restore the backbuffer's full-screen viewport without
+	// caching the backbuffer dimensions.
+	virtual void Set_Viewport(int16_t x, int16_t y,
+	                          uint16_t width, uint16_t height) = 0;
 
 	// Draw
 	virtual void Draw_Indexed(unsigned minVertexIndex,
