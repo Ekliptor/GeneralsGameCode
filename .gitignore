@@ -67,3 +67,6 @@ build.ninja
 ## Python
 __pycache__/
 *.pyc
+
+# logs
+log.log

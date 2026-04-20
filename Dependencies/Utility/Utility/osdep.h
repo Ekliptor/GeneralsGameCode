@@ -23,6 +23,14 @@
 #define __forceinline inline __attribute__((always_inline))
 #endif
 
+// __max / __min are MSVC intrinsic macros (from stdlib.h on Windows).
+#ifndef __max
+#define __max(a,b) (((a) > (b)) ? (a) : (b))
+#endif
+#ifndef __min
+#define __min(a,b) (((a) < (b)) ? (a) : (b))
+#endif
+
 // MSVC integer types — must be macros so 'unsigned __int64' expands correctly.
 #ifndef __int64
 #define __int64 long long
