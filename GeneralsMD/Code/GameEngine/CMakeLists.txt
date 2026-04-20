@@ -1164,6 +1164,13 @@ target_link_libraries(z_gameengine PRIVATE
     zi_always
 )
 
+if(RTS_PLATFORM_LOWER STREQUAL "sdl")
+    target_link_libraries(z_gameengine PRIVATE SDL3::SDL3)
+    target_include_directories(z_gameengine PRIVATE
+        ${CMAKE_SOURCE_DIR}/Core/GameEngineDevice/Include
+    )
+endif()
+
 target_link_libraries(z_gameengine PUBLIC
     corei_gameengine_public
     z_wwvegas

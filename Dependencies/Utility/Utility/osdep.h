@@ -46,11 +46,27 @@ typedef void* HANDLE;
 typedef void* HMODULE;
 typedef char* LPSTR;
 typedef const char* LPCSTR;
+// Note: DWORD/WORD/BYTE are typedef'd in Core/Libraries/Source/WWVegas/WWLib/bittype.h
+// (unsigned long / unsigned short / unsigned char). We don't redefine here to avoid
+// typedef-redefinition conflicts.
 typedef unsigned long* LPDWORD;
 typedef unsigned long* PDWORD;
 typedef int SOCKET;
 #define INVALID_SOCKET -1
 #define MAX_PATH 260
+
+// SYSTEMTIME — matches Win32 layout so replay-header serialization stays
+// byte-compatible with retail .rep files.
+typedef struct _SYSTEMTIME {
+    uint16_t wYear;
+    uint16_t wMonth;
+    uint16_t wDayOfWeek;
+    uint16_t wDay;
+    uint16_t wHour;
+    uint16_t wMinute;
+    uint16_t wSecond;
+    uint16_t wMilliseconds;
+} SYSTEMTIME;
 #endif
 
 // MSVC string function aliases.
@@ -63,8 +79,15 @@ typedef int SOCKET;
 #ifndef _isnan
 #define _isnan std::isnan
 #endif
+// Match gamespy's extern-C declarations (build_bgfx/_deps/gamespy-src/include/gamespy/gsplatform.h:427)
+#ifdef __cplusplus
+extern "C" {
+#endif
 inline char* strupr(char* s) { for (char* p = s; *p; ++p) *p = static_cast<char>(toupper(static_cast<unsigned char>(*p))); return s; }
 inline char* _strupr(char* s) { return strupr(s); }
+#ifdef __cplusplus
+}
+#endif
 
 // MSVC case-insensitive string compare aliases.
 #include <strings.h>
@@ -74,6 +97,46 @@ inline char* _strupr(char* s) { return strupr(s); }
 #ifndef _strnicmp
 #define _strnicmp strncasecmp
 #endif
+
+// MSVC _stat / _S_IFDIR aliases (POSIX equivalents).
+#include <sys/stat.h>
+#ifndef _stat
+#define _stat stat
+#endif
+#ifndef _S_IFDIR
+#define _S_IFDIR S_IFDIR
+#endif
+
+// GetLocalTime — POSIX fallback filling the SYSTEMTIME-compatible struct
+// defined above. Millisecond field is zero on non-Windows (no portable API).
+#include <ctime>
+#include <sys/time.h>
+inline void GetLocalTime(SYSTEMTIME* st) {
+    if (!st) return;
+    struct timeval tv; gettimeofday(&tv, nullptr);
+    struct tm lt; localtime_r(&tv.tv_sec, &lt);
+    st->wYear         = static_cast<uint16_t>(lt.tm_year + 1900);
+    st->wMonth        = static_cast<uint16_t>(lt.tm_mon + 1);
+    st->wDayOfWeek    = static_cast<uint16_t>(lt.tm_wday);
+    st->wDay          = static_cast<uint16_t>(lt.tm_mday);
+    st->wHour         = static_cast<uint16_t>(lt.tm_hour);
+    st->wMinute       = static_cast<uint16_t>(lt.tm_min);
+    st->wSecond       = static_cast<uint16_t>(lt.tm_sec);
+    st->wMilliseconds = static_cast<uint16_t>(tv.tv_usec / 1000);
+}
+
+// CopyFile — std::filesystem fallback. Returns non-zero on success (matches
+// Win32's BOOL). failIfExists=TRUE maps to skip_existing behaviour.
+#include <filesystem>
+#include <system_error>
+inline int CopyFile(const char* src, const char* dst, int failIfExists) {
+    std::error_code ec;
+    auto opts = failIfExists
+        ? std::filesystem::copy_options::skip_existing
+        : std::filesystem::copy_options::overwrite_existing;
+    std::filesystem::copy_file(src, dst, opts, ec);
+    return ec ? 0 : 1;
+}
 
 // Win32 string function aliases.
 #define lstrcpy  strcpy

@@ -208,9 +208,10 @@ UnicodeString getUnicodeDateBuffer(SYSTEMTIME timeVal)
 {
 	// setup date buffer for local region date format
 	#define DATE_BUFFER_SIZE 256
+	UnicodeString displayDateBuffer;
+#ifdef _WIN32
 	OSVERSIONINFO	osvi;
 	osvi.dwOSVersionInfoSize=sizeof(OSVERSIONINFO);
-	UnicodeString displayDateBuffer;
 	if (GetVersionEx(&osvi))
 	{	//check if we're running Win9x variant since they may need different characters
 		if (osvi.dwPlatformId == VER_PLATFORM_WIN32_WINDOWS)
@@ -232,14 +233,19 @@ UnicodeString getUnicodeDateBuffer(SYSTEMTIME timeVal)
 								 nullptr,
 								 dateBuffer, ARRAY_SIZE(dateBuffer) );
 	displayDateBuffer.set(dateBuffer);
+#else
+	char dateBuffer[DATE_BUFFER_SIZE];
+	snprintf(dateBuffer, sizeof(dateBuffer), "%04u-%02u-%02u", timeVal.wYear, timeVal.wMonth, timeVal.wDay);
+	displayDateBuffer.translate(dateBuffer);
+#endif
 	return displayDateBuffer;
-	//displayDateBuffer.format( L"%ls", dateBuffer );
 }
 
 UnicodeString getUnicodeTimeBuffer(SYSTEMTIME timeVal)
 {
 	// setup time buffer for local region time format
 	UnicodeString displayTimeBuffer;
+#ifdef _WIN32
 	OSVERSIONINFO	osvi;
 	osvi.dwOSVersionInfoSize=sizeof(OSVERSIONINFO);
 	if (GetVersionEx(&osvi))
@@ -266,6 +272,11 @@ UnicodeString getUnicodeTimeBuffer(SYSTEMTIME timeVal)
 								 timeBuffer,
 								 ARRAY_SIZE(timeBuffer) );
 	displayTimeBuffer.set(timeBuffer);
+#else
+	char timeBuffer[256];
+	snprintf(timeBuffer, sizeof(timeBuffer), "%02u:%02u", timeVal.wHour, timeVal.wMinute);
+	displayTimeBuffer.translate(timeBuffer);
+#endif
 	return displayTimeBuffer;
 }
 

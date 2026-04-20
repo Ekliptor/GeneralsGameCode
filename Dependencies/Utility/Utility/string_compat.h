@@ -24,12 +24,19 @@ typedef const char* LPCSTR;
 typedef char* LPSTR;
 
 // String functions
+// Match gamespy's extern-C declaration (build_bgfx/_deps/gamespy-src/include/gamespy/gsplatform.h:427)
+#ifdef __cplusplus
+extern "C" {
+#endif
 inline char *_strlwr(char *str) {
   for (int i = 0; str[i] != '\0'; i++) {
     str[i] = tolower(str[i]);
   }
   return str;
 }
+#ifdef __cplusplus
+}
+#endif
 
 #define strlwr _strlwr
 #define stricmp strcasecmp

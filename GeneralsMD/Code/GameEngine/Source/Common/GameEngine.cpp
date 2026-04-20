@@ -108,6 +108,11 @@
 
 #include "Common/version.h"
 
+#ifndef _WIN32
+#include <SDL3/SDL.h>
+#include "SDLDevice/Common/SDLGlobals.h"
+#endif
+
 
 //-------------------------------------------------------------------------------------------------
 
@@ -168,8 +173,10 @@ void initSubsystem(
 }
 
 //-------------------------------------------------------------------------------------------------
+#ifdef _WIN32
 extern HINSTANCE ApplicationHInstance;  ///< our application instance
 extern CComModule _Module;
+#endif
 
 //-------------------------------------------------------------------------------------------------
 static void updateTGAtoDDS();
@@ -234,12 +241,18 @@ static void updateWindowTitle()
 		AsciiString titleA;
 		titleA.translate(title);	//get ASCII version for Win 9x
 
+#ifdef _WIN32
 		extern HWND ApplicationHWnd;  ///< our application window handle
 		if (ApplicationHWnd) {
 			//Set it twice because Win 9x does not support SetWindowTextW.
 			::SetWindowText(ApplicationHWnd, titleA.str());
 			::SetWindowTextW(ApplicationHWnd, title.str());
 		}
+#else
+		if (SDLDevice::TheSDLWindow) {
+			SDL_SetWindowTitle(SDLDevice::TheSDLWindow, titleA.str());
+		}
+#endif
 	}
 }
 
@@ -251,7 +264,9 @@ GameEngine::GameEngine()
 	m_quitting = FALSE;
 	m_isActive = FALSE;
 
+#ifdef _WIN32
 	_Module.Init(nullptr, ApplicationHInstance, nullptr);
+#endif
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -293,7 +308,9 @@ GameEngine::~GameEngine()
 
 	Drawable::killStaticImages();
 
+#ifdef _WIN32
 	_Module.Term();
+#endif
 
 #ifdef PERF_TIMERS
 	PerfGather::termPerfDump();
@@ -931,7 +948,9 @@ void GameEngine::update()
 
 // Horrible reference, but we really, really need to know if we are windowed.
 extern bool DX8Wrapper_IsWindowed;
+#ifdef _WIN32
 extern HWND ApplicationHWnd;
+#endif
 
 /** -----------------------------------------------------------------------------------------------
  * The "main loop" of the game engine. It will not return until the game exits.

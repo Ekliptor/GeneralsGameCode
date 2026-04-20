@@ -37,6 +37,36 @@
 #include "GameNetwork/NetworkDefs.h"
 #include "trim.h"
 
+#ifndef _WIN32
+#ifdef __APPLE__
+#include <crt_externs.h>
+#endif
+// Reconstruct a Win32-style single-line command-line string from argv on
+// non-Windows. The original parseCommandLine() tokenizes GetCommandLineA()'s
+// output with a quote-and-space split; quoting each argv entry preserves
+// arguments with embedded spaces.
+static std::string GetCommandLineA()
+{
+#ifdef __APPLE__
+    int argc = *_NSGetArgc();
+    char** argv = *_NSGetArgv();
+#else
+    extern int __argc;
+    extern char** __argv;
+    int argc = __argc;
+    char** argv = __argv;
+#endif
+    std::string out;
+    for (int i = 0; i < argc; ++i) {
+        if (i > 0) out.push_back(' ');
+        out.push_back('"');
+        out.append(argv[i]);
+        out.push_back('"');
+    }
+    return out;
+}
+#endif
+
 
 
 

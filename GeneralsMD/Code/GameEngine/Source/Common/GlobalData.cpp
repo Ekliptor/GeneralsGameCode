@@ -59,6 +59,14 @@
 
 #include "GameNetwork/FirewallHelper.h"
 
+#ifndef _WIN32
+#include <filesystem>
+#include <system_error>
+#ifdef __APPLE__
+#include <mach-o/dyld.h>
+#endif
+#endif
+
 // PUBLIC DATA ////////////////////////////////////////////////////////////////////////////////////
 GlobalData* TheWritableGlobalData = nullptr;				///< The global data singleton
 
@@ -1028,7 +1036,11 @@ GlobalData::GlobalData()
 	m_shouldUpdateTGAToDDS = FALSE;
 
 	// Default DoubleClickTime to System double click time.
+#ifdef _WIN32
 	m_doubleClickTimeMS = GetDoubleClickTime(); // Note: This is actual MS, not frames.
+#else
+	m_doubleClickTimeMS = 500; // Win32 default; SDL has no system-level query.
+#endif
 
 #ifdef DUMP_PERF_STATS
 	m_dumpPerformanceStatistics = FALSE;
@@ -1043,7 +1055,14 @@ GlobalData::GlobalData()
 	// Set user data directory based on registry settings instead of INI parameters.
 	// This allows us to localize the leaf name.
 	m_userDataDir = BuildUserDataPathFromRegistry();
+#ifdef _WIN32
 	CreateDirectory(m_userDataDir.str(), nullptr);
+#else
+	{
+		std::error_code ec;
+		std::filesystem::create_directories(m_userDataDir.str(), ec);
+	}
+#endif
 
 	//-allAdvice feature
 	//m_allAdvice = FALSE;
@@ -1262,7 +1281,14 @@ UnsignedInt GlobalData::generateExeCRC()
 #else
 	{
 		Char buffer[ _MAX_PATH ];
+#ifdef _WIN32
 		GetModuleFileName( nullptr, buffer, sizeof( buffer ) );
+#elif defined(__APPLE__)
+		uint32_t size = sizeof(buffer);
+		if (_NSGetExecutablePath(buffer, &size) != 0) buffer[0] = '\0';
+#else
+		buffer[0] = '\0'; // unused on non-apple unix; CRC stays zero.
+#endif
 		fp = TheFileSystem->openFile(buffer, File::READ | File::BINARY);
 		if (fp != nullptr) {
 			unsigned char crcBlock[blockSize];
@@ -1318,6 +1344,20 @@ UnsignedInt GlobalData::generateExeCRC()
 
 AsciiString GlobalData::BuildUserDataPathFromRegistry()
 {
+#ifndef _WIN32
+	// Non-Windows build: Win32 Shell / Registry APIs aren't available. Use
+	// the platform's per-user app-support directory; registry keys that on
+	// Windows customize the leaf name are not consulted here.
+	AsciiString dir;
+	const char* home = std::getenv("HOME");
+	if (!home || !*home) home = ".";
+#ifdef __APPLE__
+	dir.format("%s/Library/Application Support/Command and Conquer Generals Zero Hour/", home);
+#else
+	dir.format("%s/.generals-zh/", home);
+#endif
+	return dir;
+#else
 #if defined(_MSC_VER) && (_MSC_VER < 1300)
 	// VC6 lacks FOLDERID_Documents and KF_FLAG_DEFAULT
 	const GUID FOLDERID_Documents = { 0xFDD39AD0, 0x238F, 0x46AF, 0xAD, 0xB4, 0x6C, 0x85, 0x48, 0x03, 0x69, 0xC7 };
@@ -1372,4 +1412,5 @@ AsciiString GlobalData::BuildUserDataPathFromRegistry()
 	}
 
 	return myDocumentsDirectory;
+#endif
 }

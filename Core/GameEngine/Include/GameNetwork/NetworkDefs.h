@@ -67,7 +67,14 @@ static constexpr const Int MAX_UDP_PAYLOAD_SIZE = 1100;
 static constexpr const Int RETAIL_GAME_PACKET_SIZE = 476;
 
 // TheSuperHackers @info The legacy lanapi cannot use a larger packet size without breaking the gameinfo command
+// On non-Windows platforms WideChar (wchar_t) is 4 bytes instead of 2, which inflates LANMessage past the retail
+// 476-byte budget. The larger packet still fits easily within MAX_UDP_PAYLOAD_SIZE so it remains fragmentation-safe.
+// LAN play between Windows and non-Windows clients is not byte-compatible as a result; that's a TODO.
+#ifdef _WIN32
 static constexpr const Int MAX_LANAPI_PACKET_SIZE = RETAIL_GAME_PACKET_SIZE;
+#else
+static constexpr const Int MAX_LANAPI_PACKET_SIZE = 700;
+#endif
 
 // TheSuperHackers @bugfix Mauller 08/02/2026 Allow larger ethernet UDP payload to be used for game messages, this fixes connection issues and eliminates disconnection bugs
 #if RETAIL_COMPATIBLE_NETWORKING

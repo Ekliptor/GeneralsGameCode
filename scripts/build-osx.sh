@@ -6,12 +6,7 @@
 #   scripts/build-osx.sh [flags]
 #
 # Flags:
-#   --target {zh|generals|both}   What to build (default: zh).
-#                                 NOTE: "generals" (vanilla) and "both" currently
-#                                 fail to link — base-Generals WW3D2 sources
-#                                 still reference Win32 APIs (ddraw.h, windows.h)
-#                                 not yet ported. Zero Hour is the supported
-#                                 target on macOS.
+#   --target {zh|generals|both}   What to build (default: both).
 #   --build   DIR                 CMake binary dir (default: build_bgfx).
 #   --config  CFG                 Release|Debug|RelWithDebInfo (default: Release).
 #   --sign-id ID                  codesign identity (default: "-" ad-hoc).
@@ -33,7 +28,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 
-TARGET="zh"
+TARGET="both"
 BUILD_DIR="build_bgfx"
 CONFIG="Release"
 SIGN_ID="-"
@@ -42,7 +37,7 @@ RECONFIGURE=0
 CLEAN=0
 JOBS="$(sysctl -n hw.ncpu 2>/dev/null || echo 4)"
 
-usage() { sed -n '2,28p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,22p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
 
 while (($#)); do
     case "$1" in

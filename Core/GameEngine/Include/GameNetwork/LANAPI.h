@@ -44,8 +44,18 @@ static const Int g_lanHostNameLength = 1;
 static const Int g_lanGameNameLength = 16; // reduced length because of game option length
 static const Int g_lanGameNameReservedLength = 16; // save N wchars for ID info
 static const Int g_lanMaxChatLength = 100;
+#ifdef _WIN32
 static const Int m_lanMaxOptionsLength = MAX_LANAPI_PACKET_SIZE - ( 8 + (g_lanGameNameLength+1)*2 + 4 + (g_lanPlayerNameLength+1)*2
 																														+ (g_lanLoginNameLength+1) + (g_lanHostNameLength+1) );
+#else
+// Non-Windows: WideChar (wchar_t) is 4 bytes, so every WideChar[] field in
+// LANMessage is double-size. The dominant variant is GameInfo (gameName[17]
+// + inProgress + options[N+1] + isDirectConnect). Subtracting 140 leaves
+// slack for the enum + name[] + userName[] + hostName[] + gameName[] + two
+// Bool flags + a few bytes of headroom. MAX_LANAPI_PACKET_SIZE on non-Windows
+// is bumped in NetworkDefs.h to fit the widened struct.
+static const Int m_lanMaxOptionsLength = MAX_LANAPI_PACKET_SIZE - 140;
+#endif
 static const Int g_maxSerialLength = 23; // including the trailing '\0'
 
 struct LANMessage;

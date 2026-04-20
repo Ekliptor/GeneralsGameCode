@@ -72,8 +72,11 @@ struct GameWindowEditData;
 enum { WIN_COLOR_UNDEFINED = GAME_COLOR_UNDEFINED };
 
 // WindowMsgData --------------------------------------------------------------
+// Holds either a small integer or a pointer stashed in a window-message arg —
+// mirrors Win32 LPARAM semantics. Must be pointer-sized so 64-bit builds can
+// pass `(WindowMsgData)&someObj` without truncation.
 //-----------------------------------------------------------------------------
-typedef UnsignedInt WindowMsgData;
+typedef uintptr_t WindowMsgData;
 
 //-----------------------------------------------------------------------------
 enum WindowMsgHandledType CPP_11(: Int) { MSG_IGNORED, MSG_HANDLED };
