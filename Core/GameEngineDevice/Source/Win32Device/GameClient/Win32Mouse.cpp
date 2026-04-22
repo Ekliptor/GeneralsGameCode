@@ -27,8 +27,10 @@
 // Desc:       Interface for the mouse using only the Win32 messages
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
+#ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#endif
 
 #include "Common/Debug.h"
 #include "Common/GlobalData.h"
@@ -213,7 +215,9 @@ void Win32Mouse::translateEvent( UnsignedInt eventIndex, MouseIO *result )
 			// translate the screen mouse position to be relative to the application window
 			p.x = LOWORD( lParam );
 			p.y = HIWORD( lParam );
+#ifdef _WIN32
 			ScreenToClient( ApplicationHWnd, &p );
+#endif
 
 			// note the short cast here to keep signed information in tact
 			result->wheelPos = (Short)HIWORD( wParam );
@@ -337,7 +341,9 @@ void Win32Mouse::addWin32Event( UINT msg, WPARAM wParam, LPARAM lParam, DWORD ti
 
 }
 
+#ifdef _WIN32
 extern HINSTANCE ApplicationHInstance;
+#endif
 
 void Win32Mouse::setVisibility(Bool visible)
 {
@@ -433,7 +439,7 @@ void Win32Mouse::setCursor( MouseCursor cursor )
 //-------------------------------------------------------------------------------------------------
 void Win32Mouse::capture()
 {
-
+#ifdef _WIN32
 	RECT rect;
 	::GetClientRect(ApplicationHWnd, &rect);
 
@@ -457,7 +463,10 @@ void Win32Mouse::capture()
 	{
 		onCursorCaptured(true);
 	}
-
+#else
+	// SDL_CaptureMouse is called elsewhere; nothing Win32-specific to do here.
+	onCursorCaptured(true);
+#endif
 }
 
 //-------------------------------------------------------------------------------------------------

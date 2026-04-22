@@ -325,6 +325,7 @@ void PingThreadClass::Thread_Function()
 //-------------------------------------------------------------------------
 //-------------------------------------------------------------------------
 
+#ifdef _WIN32
 HANDLE WINAPI IcmpCreateFile(VOID); /* INVALID_HANDLE_VALUE on error */
 BOOL WINAPI IcmpCloseHandle(HANDLE IcmpHandle); /* FALSE on error */
 
@@ -560,6 +561,14 @@ cleanup:
 
    return pingTime;
 }
+#else // !_WIN32
+Int PingThreadClass::doPing(UnsignedInt /*IP*/, Int /*timeout*/)
+{
+   // ICMP ping via raw sockets requires root on macOS/Linux; GameSpy lobby
+   // latency is cosmetic, so we report -1 (unknown) to skip the ping column.
+   return -1;
+}
+#endif // _WIN32
 
 
 //-------------------------------------------------------------------------

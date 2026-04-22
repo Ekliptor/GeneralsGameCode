@@ -339,9 +339,17 @@ void Keyboard::initKeyNames()
 
 	_set_keyname_(L' ',		L' ',		L'\0',	KEY_SPACE  );
 
+#ifdef _WIN32
 	HKL kLayout = GetKeyboardLayout(0);
 
-	Int low = (UnsignedInt)kLayout & 0xFFFF;
+	Int low = (UnsignedInt)(uintptr_t)kLayout & 0xFFFF;
+#else
+	// No Win32 HKL/GetKeyboardLayout on macOS; default to US layout.
+	// SDL exposes keyboard-layout APIs but the engine uses the 0x040C-style
+	// Win32 LCIDs. Treating everything as US is a workable default — French
+	// AZERTY detection is the only consumer and is cosmetic (keypad labels).
+	Int low = 0x0409; // LANG_ENGLISH / SUBLANG_ENGLISH_US
+#endif
 	LanguageID currentLanguage = OurLanguage;
 	if(low == 0x040c
 		 || low == 0x080c

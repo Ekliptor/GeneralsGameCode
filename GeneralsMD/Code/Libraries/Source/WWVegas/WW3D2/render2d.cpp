@@ -862,3 +862,33 @@ Vector2	Render2DTextClass::Get_Text_Extents( const WCHAR * text )
 
 #endif // RTS_RENDERER_DX8
 
+#ifndef RTS_RENDERER_DX8
+// Phase 5h — bgfx link-time stubs. Unreachable at runtime (bgfx renders 2D via
+// its own path) but the symbols must exist so TheDisplay / UI code links.
+#include "render2d.h"
+
+RectClass Render2DClass::ScreenResolution(0, 0, 640, 480);
+
+Render2DClass::Render2DClass(TextureClass* /*tex*/)
+	: Texture(nullptr), IsHidden(false), IsGrayScale(false), ZValue(0.0f)
+{}
+Render2DClass::~Render2DClass() {}
+void Render2DClass::Reset() {}
+void Render2DClass::Render() {}
+void Render2DClass::Set_Coordinate_Range(const RectClass& /*r*/) {}
+void Render2DClass::Set_Texture(TextureClass* /*t*/) {}
+void Render2DClass::Set_Texture(const char* /*filename*/) {}
+void Render2DClass::Enable_Additive(bool /*b*/) {}
+void Render2DClass::Enable_Alpha(bool /*b*/) {}
+void Render2DClass::Enable_Grayscale(bool /*b*/) {}
+void Render2DClass::Enable_Texturing(bool /*b*/) {}
+void Render2DClass::Set_Screen_Resolution(const RectClass& s) { ScreenResolution = s; }
+ShaderClass Render2DClass::Get_Default_Shader() { return ShaderClass(); }
+void Render2DClass::Add_Quad(const RectClass&, const RectClass&, unsigned long) {}
+void Render2DClass::Add_Tri(const Vector2&, const Vector2&, const Vector2&, const Vector2&, const Vector2&, const Vector2&, unsigned long) {}
+void Render2DClass::Add_Line(const Vector2&, const Vector2&, float, unsigned long) {}
+void Render2DClass::Add_Line(const Vector2&, const Vector2&, float, unsigned long, unsigned long) {}
+void Render2DClass::Add_Outline(const RectClass&, float, unsigned long) {}
+void Render2DClass::Add_Rect(const RectClass&, float, unsigned long, unsigned long) {}
+#endif // !RTS_RENDERER_DX8
+

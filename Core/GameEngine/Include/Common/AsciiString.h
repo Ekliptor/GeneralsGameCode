@@ -50,6 +50,18 @@
 #include "Common/Debug.h"
 #include "Common/Errors.h"
 
+#ifndef _WIN32
+#include <strings.h>
+#include <cstring>
+#include <wchar.h>
+#ifndef _stricmp
+#define _stricmp strcasecmp
+#endif
+#ifndef _strnicmp
+#define _strnicmp strncasecmp
+#endif
+#endif
+
 class UnicodeString;
 
 // -----------------------------------------------------

@@ -88,6 +88,46 @@
 #define WSAETIMEDOUT ETIMEDOUT
 #endif
 
+#ifndef WSAEALREADY
+#define WSAEALREADY EALREADY
+#endif
+
+#ifndef WSAENETUNREACH
+#define WSAENETUNREACH ENETUNREACH
+#endif
+
+#ifndef WSAEHOSTUNREACH
+#define WSAEHOSTUNREACH EHOSTUNREACH
+#endif
+
+#ifndef WSAECONNRESET
+#define WSAECONNRESET ECONNRESET
+#endif
+
+#ifndef WSAECONNABORTED
+#define WSAECONNABORTED ECONNABORTED
+#endif
+
+#ifndef WSAENOBUFS
+#define WSAENOBUFS ENOBUFS
+#endif
+
+#ifndef WSAEMSGSIZE
+#define WSAEMSGSIZE EMSGSIZE
+#endif
+
+// gamespy's gsplatformsocket.h does `#define closesocket close` on Unix.
+// Undefine so our inline wrapper below is not rewritten into a redeclaration
+// of the POSIX close().
+#ifdef closesocket
+#undef closesocket
+#endif
+#ifdef ioctlsocket
+#undef ioctlsocket
+#endif
+#ifdef WSAGetLastError
+#undef WSAGetLastError
+#endif
 static inline int closesocket(int fd) { return ::close(fd); }
 static inline int ioctlsocket(int fd, long cmd, unsigned long *argp)
 {

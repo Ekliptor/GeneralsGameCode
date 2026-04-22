@@ -742,3 +742,11 @@ void SortingRendererClass::Insert_VolumeParticle(
 }
 
 #endif // RTS_RENDERER_DX8
+
+#ifndef RTS_RENDERER_DX8
+#include "sortingrenderer.h"
+void SortingRendererClass::Flush() {}
+void SortingRendererClass::Insert_Triangles(const SphereClass&, unsigned short, unsigned short, unsigned short, unsigned short) {}
+void SortingRendererClass::Insert_Triangles(unsigned short, unsigned short, unsigned short, unsigned short) {}
+void SortingRendererClass::SetMinVertexBufferSize(unsigned) {}
+#endif

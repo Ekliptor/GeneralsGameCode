@@ -41,6 +41,11 @@
 #include "GameClient/Image.h"
 #include "Common/NameKeyGenerator.h"
 
+#ifndef _WIN32
+#include <filesystem>
+#include <system_error>
+#endif
+
 // PRIVATE DATA ///////////////////////////////////////////////////////////////////////////////////
 const FieldParse Image::m_imageFieldParseTable[] =
 {
@@ -248,16 +253,35 @@ void ImageCollection::load( Int textureSize )
 	char buffer[ _MAX_PATH ];
 	INI ini;
 	// first load in the user created mapped image files if we have them.
-	WIN32_FIND_DATA findData;
 	AsciiString userDataPath;
 	if(TheGlobalData)
 	{
+#ifdef _WIN32
+		WIN32_FIND_DATA findData;
 		userDataPath.format("%sINI\\MappedImages\\*.ini",TheGlobalData->getPath_UserData().str());
 		if(FindFirstFile(userDataPath.str(), &findData) !=INVALID_HANDLE_VALUE)
 		{
 			userDataPath.format("%sINI\\MappedImages",TheGlobalData->getPath_UserData().str());
 			ini.loadDirectory(userDataPath, INI_LOAD_OVERWRITE, nullptr );
 		}
+#else
+		// std::filesystem fallback: look for any *.ini in the MappedImages dir.
+		userDataPath.format("%sINI/MappedImages", TheGlobalData->getPath_UserData().str());
+		std::error_code ec;
+		std::filesystem::path dirPath = userDataPath.str();
+		if (std::filesystem::exists(dirPath, ec) && !ec)
+		{
+			for (auto const& entry : std::filesystem::directory_iterator(dirPath, ec))
+			{
+				if (ec) break;
+				if (entry.is_regular_file() && entry.path().extension() == ".ini")
+				{
+					ini.loadDirectory(userDataPath, INI_LOAD_OVERWRITE, nullptr);
+					break;
+				}
+			}
+		}
+#endif
 	}
 
 	// construct path to the mapped images folder of the correct texture size

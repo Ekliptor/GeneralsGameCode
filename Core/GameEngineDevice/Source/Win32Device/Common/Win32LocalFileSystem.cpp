@@ -26,6 +26,7 @@
 // Bryan Cleveland, August 2002
 ////////////////////////////////////////////////////////////
 
+#ifdef _WIN32
 #include <windows.h>
 #include "Common/AsciiString.h"
 #include "Common/GameMemory.h"
@@ -231,3 +232,4 @@ AsciiString Win32LocalFileSystem::normalizePath(const AsciiString& filePath) con
 
 	return normalizedFilePath;
 }
+#endif // _WIN32

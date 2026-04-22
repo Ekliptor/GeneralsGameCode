@@ -29,7 +29,9 @@
 //   the game application, it creates all the devices we will use for the game
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
+#ifdef _WIN32
 #include <windows.h>
+#endif
 
 #include "Win32Device/Common/Win32GameEngine.h"
 #include "Common/PerfTimer.h"
@@ -43,8 +45,12 @@ extern DWORD TheMessageTime;
 //-------------------------------------------------------------------------------------------------
 Win32GameEngine::Win32GameEngine()
 {
+#ifdef _WIN32
 	// Stop blue screen
 	m_previousErrorMode = SetErrorMode( SEM_FAILCRITICALERRORS );
+#else
+	m_previousErrorMode = 0;
+#endif
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -52,8 +58,10 @@ Win32GameEngine::Win32GameEngine()
 //-------------------------------------------------------------------------------------------------
 Win32GameEngine::~Win32GameEngine()
 {
+#ifdef _WIN32
 	// restore it (this isn't really necessary, but feels good.)
 	SetErrorMode( m_previousErrorMode );
+#endif
 }
 
 
@@ -90,6 +98,7 @@ void Win32GameEngine::update()
 	// call the engine normal update
 	GameEngine::update();
 
+#ifdef _WIN32
 	extern HWND ApplicationHWnd;
 	if (ApplicationHWnd && ::IsIconic(ApplicationHWnd)) {
 		while (ApplicationHWnd && ::IsIconic(ApplicationHWnd)) {
@@ -119,6 +128,7 @@ void Win32GameEngine::update()
 		TheAudio->setVolume(TheAudio->getVolume( aa ), aa );
 
 	}
+#endif
 
 	// allow windows to perform regular windows maintenance stuff like msgs
 	serviceWindowsOS();
@@ -133,6 +143,7 @@ void Win32GameEngine::update()
 //-------------------------------------------------------------------------------------------------
 void Win32GameEngine::serviceWindowsOS()
 {
+#ifdef _WIN32
 	MSG msg;
   Int returnValue;
 
@@ -165,6 +176,6 @@ void Win32GameEngine::serviceWindowsOS()
 		TheMessageTime = 0;
 
 	}
-
+#endif
 }
 

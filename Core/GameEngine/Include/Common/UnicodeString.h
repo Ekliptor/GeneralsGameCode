@@ -50,6 +50,11 @@
 #include "Common/Debug.h"
 #include "Common/Errors.h"
 
+#ifndef _WIN32
+#include <wchar.h>
+#include <wctype.h>
+#endif
+
 class AsciiString;
 
 // -----------------------------------------------------

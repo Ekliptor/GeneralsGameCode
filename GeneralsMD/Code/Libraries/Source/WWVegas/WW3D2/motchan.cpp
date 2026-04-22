@@ -1316,3 +1316,10 @@ return;
 // EOF - motchan.cpp
 
 #endif // RTS_RENDERER_DX8
+
+// TODO Phase 5h — bgfx-side stubs for MotionChannelClass/BitChannelClass/
+// TimeCodedMotionChannelClass/AdaptiveDeltaMotionChannelClass/
+// TimeCodedBitChannelClass. These classes have constructors + Load_W3D +
+// Get_Vector/Get_QuatVector/Get_Bit methods with non-trivial member lists;
+// stubbing each requires header-by-header signature matching. Deferred to a
+// follow-up pass — for now the link fails with these symbols unresolved.

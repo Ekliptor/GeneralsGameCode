@@ -18,7 +18,7 @@
 
 #pragma once
 
-#ifdef RTS_ENABLE_CRASHDUMP
+#if defined(RTS_ENABLE_CRASHDUMP) && defined(_WIN32)
 #include "DbgHelpLoader.h"
 
 enum DumpType CPP_11(: Char)

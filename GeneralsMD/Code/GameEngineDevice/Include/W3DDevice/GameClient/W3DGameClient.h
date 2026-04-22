@@ -51,8 +51,9 @@
 #include "VideoDevice/Bink/BinkVideoPlayer.h"
 #endif
 #if RTS_PLATFORM_SDL
-#include "SDLDevice/Common/SDLGameEngine.h"
 #include "SDLDevice/GameClient/SDLKeyboard.h"
+// Avoid circular include via SDLGameEngine.h -> Win32GameEngine.h -> W3DGameClient.h.
+extern class SDLKeyboard *TheSDLKeyboard;
 #else
 #include "Win32Device/GameClient/Win32DIKeyboard.h"
 #include "Win32Device/GameClient/Win32DIMouse.h"

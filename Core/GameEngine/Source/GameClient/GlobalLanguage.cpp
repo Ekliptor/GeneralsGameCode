@@ -140,8 +140,10 @@ GlobalLanguage::~GlobalLanguage()
 	while( it != m_localFonts.end())
 	{
 		AsciiString font = *it;
+#ifdef _WIN32
 		RemoveFontResource(font.str());
 		//SendMessage( HWND_BROADCAST, WM_FONTCHANGE, 0, 0);
+#endif
 		++it;
 	}
 }
@@ -160,6 +162,7 @@ void GlobalLanguage::init()
 	while( it != m_localFonts.end())
 	{
 		AsciiString font = *it;
+#ifdef _WIN32
 		if(AddFontResource(font.str()) == 0)
 		{
 			DEBUG_CRASH(("GlobalLanguage::init Failed to add font %s", font.str()));
@@ -168,6 +171,12 @@ void GlobalLanguage::init()
 		{
 			//SendMessage( HWND_BROADCAST, WM_FONTCHANGE, 0, 0);
 		}
+#else
+		// macOS/Linux: font-install API is CoreText / fontconfig; not ported.
+		// The map-specific local font files are informational rather than
+		// strictly required for gameplay, so skip registration.
+		(void)font;
+#endif
 		++it;
 	}
 

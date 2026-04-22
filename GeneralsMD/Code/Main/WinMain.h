@@ -33,12 +33,16 @@
 #pragma once
 
 // SYSTEM INCLUDES ////////////////////////////////////////////////////////////
+#ifdef _WIN32
 #include <windows.h>
+#endif
 
 // USER INCLUDES //////////////////////////////////////////////////////////////
 #include "Win32Device/GameClient/Win32Mouse.h"
 
 // EXTERNAL ///////////////////////////////////////////////////////////////////
+#ifdef _WIN32
 extern HINSTANCE ApplicationHInstance;  ///< our application instance
 extern HWND ApplicationHWnd;  ///< our application window handle
+#endif
 extern Win32Mouse *TheWin32Mouse;  ///< global for win32 mouse only!

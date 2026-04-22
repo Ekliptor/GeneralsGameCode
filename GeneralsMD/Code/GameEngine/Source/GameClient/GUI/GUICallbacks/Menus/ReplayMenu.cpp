@@ -808,9 +808,15 @@ void copyReplay()
 	filename.concat(translate);
 
 	char path[1024];
+#ifdef _WIN32
 	LPITEMIDLIST pidl;
 	SHGetSpecialFolderLocation(nullptr, CSIDL_DESKTOPDIRECTORY, &pidl);
 	SHGetPathFromIDList(pidl,path);
+#else
+	// On macOS/Linux, the Desktop is $HOME/Desktop.
+	const char* home = std::getenv("HOME");
+	std::snprintf(path, sizeof(path), "%s/Desktop", home ? home : ".");
+#endif
 	AsciiString newFilename;
 	newFilename.set(path);
 	newFilename.concat("\\");

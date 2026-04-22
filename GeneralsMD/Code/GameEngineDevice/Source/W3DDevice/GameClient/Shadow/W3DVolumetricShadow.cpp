@@ -1324,6 +1324,7 @@ void W3DVolumetricShadow::RenderVolume(Int meshIndex, Int lightIndex)
 
 void W3DVolumetricShadow::RenderMeshVolume(Int meshIndex, Int lightIndex, const Matrix3D *meshXform)
 {
+#ifdef RTS_RENDERER_DX8
 	Geometry *geometry;
 	Int numVerts, numPolys, numIndex;
 
@@ -1377,11 +1378,13 @@ void W3DVolumetricShadow::RenderMeshVolume(Int meshIndex, Int lightIndex, const 
 		Debug_Statistics::Record_DX8_Polys_And_Vertices(numPolys,numVerts,ShaderClass::_PresetOpaqueShader);
 		m_pDev->DrawIndexedPrimitive(D3DPT_TRIANGLELIST,0,numVerts,ibSlot->m_start,numPolys);
 	}
+#endif // RTS_RENDERER_DX8
 
 }
 
 void W3DVolumetricShadow::RenderDynamicMeshVolume(Int meshIndex, Int lightIndex, const Matrix3D *meshXform)
 {
+#ifdef RTS_RENDERER_DX8
 	Geometry *geometry;
 	Int numVerts, numPolys, numIndex;
 	SHADOW_DYNAMIC_VOLUME_VERTEX* pvVertices;
@@ -1483,11 +1486,13 @@ void W3DVolumetricShadow::RenderDynamicMeshVolume(Int meshIndex, Int lightIndex,
 
 	nShadowIndicesInBuf += numIndex;
 	nShadowStartBatchIndex=nShadowIndicesInBuf;
+#endif // RTS_RENDERER_DX8
 }
 
 /** Debug function to draw bounding boxes around shadow volumes */
 void W3DVolumetricShadow::RenderMeshVolumeBounds(Int meshIndex, Int lightIndex, const Matrix3D *meshXform)
 {
+#ifdef RTS_RENDERER_DX8
 	Geometry *geometry;
 	Int numVerts, numPolys, numIndex;
 	SHADOW_DYNAMIC_VOLUME_VERTEX* pvVertices;
@@ -1632,6 +1637,7 @@ void W3DVolumetricShadow::RenderMeshVolumeBounds(Int meshIndex, Int lightIndex, 
 
 	nShadowIndicesInBuf += numIndex;
 	nShadowStartBatchIndex=nShadowIndicesInBuf;
+#endif // RTS_RENDERER_DX8
 }
 
 // Shadow =====================================================================
@@ -3356,6 +3362,7 @@ void W3DVolumetricShadowManager::renderStencilShadows()
     v[2].color = TheW3DShadowManager->getShadowColor();
     v[3].color = TheW3DShadowManager->getShadowColor();
 
+#ifdef RTS_RENDERER_DX8
 	//draw polygons like this is very inefficient but for only 2 triangles, it's
 	//not worth bothering with index/vertex buffers.
 	m_pDev->SetVertexShader(D3DFVF_XYZRHW | D3DFVF_DIFFUSE);
@@ -3392,11 +3399,13 @@ void W3DVolumetricShadowManager::renderStencilShadows()
 	m_pDev->SetRenderState( D3DRS_ALPHABLENDENABLE, FALSE );
 	// turn off the stencil buffer
 	m_pDev->SetRenderState( D3DRS_STENCILENABLE, FALSE );
+#endif // RTS_RENDERER_DX8
 
 }
 
 void W3DVolumetricShadowManager::renderShadows( Bool forceStencilFill )
 {
+#ifdef RTS_RENDERER_DX8
 	W3DVolumetricShadow *shadow;
 	Int numRenderedShadows = 0;
 
@@ -3625,6 +3634,7 @@ void W3DVolumetricShadowManager::renderShadows( Bool forceStencilFill )
 
 		DX8Wrapper::Invalidate_Cached_Render_States();
 	}
+#endif // RTS_RENDERER_DX8
 
 }
 

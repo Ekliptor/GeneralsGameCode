@@ -35,6 +35,9 @@
 #include "Common/SubsystemInterface.h"
 #include "Common/UnicodeString.h"
 #include "GameNetwork/NetworkDefs.h"
+#ifndef _WIN32
+#include <Utility/osdep.h>
+#endif
 
 // FORWARD REFERENCES /////////////////////////////////////////////////////////////////////////////
 class GameWindow;

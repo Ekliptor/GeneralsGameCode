@@ -62,8 +62,15 @@ typedef void*       HINSTANCE;
 #define WINAPI
 #endif
 
+#ifndef _RECT_DEFINED_
+#define _RECT_DEFINED_
 struct RECT  { LONG left, top, right, bottom; };
+#endif
+struct D3DLOCKED_RECT;
+#ifndef _POINT_DEFINED_
+#define _POINT_DEFINED_
 struct POINT { LONG x, y; };
+#endif
 
 struct GUID {
     uint32_t Data1;
@@ -72,10 +79,13 @@ struct GUID {
     uint8_t  Data4[8];
 };
 
+#ifndef _LARGE_INTEGER_DEFINED_
+#define _LARGE_INTEGER_DEFINED_
 typedef union _LARGE_INTEGER {
     struct { uint32_t LowPart; int32_t HighPart; };
     int64_t QuadPart;
 } LARGE_INTEGER;
+#endif
 
 #ifndef MAKEFOURCC
 #define MAKEFOURCC(a, b, c, d) \
@@ -95,15 +105,38 @@ typedef union _LARGE_INTEGER {
 #ifndef _D3D8_COM_STUBS_DEFINED
 #define _D3D8_COM_STUBS_DEFINED
 
+struct D3DADAPTER_IDENTIFIER8;
+
 struct IDirect3D8 {
     unsigned long AddRef()  { return 1; }
     unsigned long Release() { return 0; }
+    // Phase 5h — adapter-enum no-op stub. bgfx queries its own GPU identity.
+    HRESULT GetAdapterIdentifier(UINT /*adapter*/, DWORD /*flags*/, D3DADAPTER_IDENTIFIER8* /*pIdent*/) { return S_OK; }
+    UINT GetAdapterCount() { return 1; }
 };
+
+#ifndef D3DENUM_NO_WHQL_LEVEL
+#define D3DENUM_NO_WHQL_LEVEL 0x00000002L
+#endif
+
+#ifndef D3DWRAP_U
+#define D3DWRAP_U 0x00000001
+#endif
+#ifndef D3DWRAP_V
+#define D3DWRAP_V 0x00000002
+#endif
+#ifndef D3DWRAP_W
+#define D3DWRAP_W 0x00000004
+#endif
 
 // Forward decls for Create* stubs on IDirect3DDevice8 — the full declarations
 // live later in this section.
 struct IDirect3DVertexBuffer8;
 struct IDirect3DIndexBuffer8;
+struct IDirect3DSurface8;
+struct IDirect3DBaseTexture8;
+struct IDirect3DTexture8;
+struct D3DSURFACE_DESC;
 
 struct IDirect3DDevice8 {
     unsigned long AddRef()  { return 1; }
@@ -128,7 +161,55 @@ struct IDirect3DDevice8 {
         return S_OK;
     }
     HRESULT ResourceManagerDiscardBytes(DWORD /*bytes*/) { return S_OK; }
+    // Phase 5h — scene-render no-op stubs so W3DScene's custom/extra-pass path
+    // and renderStenciledPlayerColor compile in bgfx mode. Runtime-cold:
+    // bgfx has its own shader / state / primitive draw path.
+    HRESULT SetVertexShader(DWORD /*handle*/) { return S_OK; }
+    HRESULT GetRenderState(DWORD /*state*/, DWORD* pValue) { if (pValue) *pValue = 0; return S_OK; }
+    HRESULT DrawPrimitiveUP(UINT /*type*/, UINT /*primCount*/, const void* /*data*/, UINT /*stride*/) { return S_OK; }
+    HRESULT TestCooperativeLevel() { return S_OK; }
+    // Phase 5h — hardware cursor no-op stubs. bgfx doesn't drive a hardware
+    // cursor; the W3DMouse cursor path renders via 2D/3D assets.
+    BOOL ShowCursor(BOOL /*show*/) { return TRUE; }
+    HRESULT SetCursorProperties(UINT /*xHotSpot*/, UINT /*yHotSpot*/, IDirect3DSurface8* /*pCursorBitmap*/) { return S_OK; }
+    void SetCursorPosition(int /*x*/, int /*y*/, DWORD /*flags*/) {}
+    // Phase 5h — shader / texture-stage / pixel-shader no-op stubs for the
+    // legacy fixed-function + ps.1.1 paths. Runtime-cold: bgfx has its own
+    // shader pipeline; these calls are dead in the bgfx build.
+    HRESULT SetTexture(DWORD /*stage*/, IDirect3DBaseTexture8* /*texture*/) { return S_OK; }
+    HRESULT SetTextureStageState(DWORD /*stage*/, DWORD /*type*/, DWORD /*value*/) { return S_OK; }
+    HRESULT SetPixelShader(DWORD /*handle*/) { return S_OK; }
+    HRESULT SetPixelShaderConstant(DWORD /*reg*/, const void* /*data*/, DWORD /*count*/) { return S_OK; }
+    HRESULT DeletePixelShader(DWORD /*handle*/) { return S_OK; }
+    HRESULT CreatePixelShader(const DWORD* /*function*/, DWORD* pHandle) { if (pHandle) *pHandle = 0; return S_OK; }
+    HRESULT DeleteVertexShader(DWORD /*handle*/) { return S_OK; }
+    HRESULT CreateVertexShader(const DWORD* /*decl*/, const DWORD* /*function*/, DWORD* pHandle, DWORD /*usage*/) { if (pHandle) *pHandle = 0; return S_OK; }
+    HRESULT SetVertexShaderConstant(DWORD /*reg*/, const void* /*data*/, DWORD /*count*/) { return S_OK; }
+    HRESULT SetStreamSource(UINT /*num*/, IDirect3DVertexBuffer8* /*pStream*/, UINT /*stride*/) { return S_OK; }
+    HRESULT SetIndices(IDirect3DIndexBuffer8* /*pIB*/, UINT /*baseVertexIndex*/) { return S_OK; }
+    HRESULT BeginScene() { return S_OK; }
+    HRESULT EndScene() { return S_OK; }
+    HRESULT Present(const RECT* /*src*/, const RECT* /*dst*/, HWND /*hwnd*/, const void* /*unused*/) { return S_OK; }
+    HRESULT Clear(DWORD /*count*/, const void* /*rects*/, DWORD /*flags*/, DWORD /*color*/, float /*z*/, DWORD /*stencil*/) { return S_OK; }
+    // Phase 5h — render-target / texture-create no-op stubs.
+    HRESULT GetRenderTarget(IDirect3DSurface8** ppSurface) { if (ppSurface) *ppSurface = nullptr; return S_OK; }
+    HRESULT SetRenderTarget(IDirect3DSurface8* /*pRenderTarget*/, IDirect3DSurface8* /*pZStencil*/) { return S_OK; }
+    HRESULT GetDepthStencilSurface(IDirect3DSurface8** ppSurface) { if (ppSurface) *ppSurface = nullptr; return S_OK; }
+    HRESULT CreateTexture(UINT /*width*/, UINT /*height*/, UINT /*levels*/, DWORD /*usage*/, UINT /*format*/, UINT /*pool*/, IDirect3DTexture8** ppTexture) { if (ppTexture) *ppTexture = nullptr; return S_OK; }
+    HRESULT SetRenderState(DWORD /*state*/, DWORD /*value*/) { return S_OK; }
+    HRESULT SetTransform(DWORD /*state*/, const void* /*matrix*/) { return S_OK; }
+    HRESULT GetTransform(DWORD /*state*/, void* /*matrix*/) { return S_OK; }
+    HRESULT SetViewport(const void* /*viewport*/) { return S_OK; }
+    HRESULT GetViewport(void* /*viewport*/) { return S_OK; }
+    HRESULT DrawIndexedPrimitive(DWORD /*type*/, UINT /*minVtx*/, UINT /*numVtx*/, UINT /*startIdx*/, UINT /*primCount*/) { return S_OK; }
+    HRESULT DrawPrimitive(DWORD /*type*/, UINT /*startVtx*/, UINT /*primCount*/) { return S_OK; }
+    HRESULT CreateImageSurface(UINT /*width*/, UINT /*height*/, UINT /*format*/, IDirect3DSurface8** ppSurface) { if (ppSurface) *ppSurface = nullptr; return S_OK; }
+    HRESULT CopyRects(IDirect3DSurface8* /*src*/, const RECT* /*srcRects*/, UINT /*numRects*/, IDirect3DSurface8* /*dst*/, const POINT* /*destPoints*/) { return S_OK; }
 };
+
+#ifndef _WIN32
+#define D3DCURSOR_IMMEDIATE_UPDATE 0x00000001
+#endif
 
 struct IDirect3DBaseTexture8 {
     unsigned long AddRef()  { return 1; }
@@ -138,15 +219,31 @@ struct IDirect3DBaseTexture8 {
     // meaningless here. Fixed return (0) keeps callers deterministic.
     DWORD GetPriority() { return 0; }
     DWORD SetPriority(DWORD /*new_priority*/) { return 0; }
+    DWORD SetLOD(DWORD /*new_lod*/) { return 0; }
+    DWORD GetLOD() { return 0; }
 };
 
-struct IDirect3DTexture8 : IDirect3DBaseTexture8 {};
+struct IDirect3DTexture8 : IDirect3DBaseTexture8 {
+    // Phase 5h — no-op surface-level accessor so TerrainTex / DX8 texture copy
+    // paths compile in bgfx mode. Runtime-cold: bgfx owns its own texture data.
+    inline HRESULT GetSurfaceLevel(UINT /*level*/, IDirect3DSurface8** ppSurface);
+    inline HRESULT GetLevelDesc(UINT /*level*/, D3DSURFACE_DESC* pDesc);
+    inline HRESULT LockRect(UINT /*level*/, D3DLOCKED_RECT* pLockedRect, const RECT* /*pRect*/, DWORD /*flags*/);
+    inline HRESULT UnlockRect(UINT /*level*/);
+    DWORD GetLevelCount() { return 1; }
+};
 struct IDirect3DCubeTexture8 : IDirect3DBaseTexture8 {};
 struct IDirect3DVolumeTexture8 : IDirect3DBaseTexture8 {};
 
 struct IDirect3DSurface8 {
     unsigned long AddRef()  { return 1; }
     unsigned long Release() { return 0; }
+    // Phase 5h — no-op stubs for locked-rect access. Runtime-cold in bgfx mode;
+    // shroud/snapshot paths call into these as part of D3D surface handling.
+    // Defined below D3DLOCKED_RECT to keep that struct opaque here.
+    inline HRESULT LockRect(D3DLOCKED_RECT* pLockedRect, const RECT* /*pRect*/, DWORD /*flags*/);
+    HRESULT UnlockRect() { return S_OK; }
+    inline HRESULT GetDesc(D3DSURFACE_DESC* pDesc);
 };
 
 struct IDirect3DSwapChain8 {
@@ -294,6 +391,12 @@ struct D3DLOCKED_RECT {
     void* pBits;
 };
 
+inline HRESULT IDirect3DSurface8::LockRect(D3DLOCKED_RECT* pLockedRect, const RECT* /*pRect*/, DWORD /*flags*/)
+{
+    if (pLockedRect) { pLockedRect->Pitch = 0; pLockedRect->pBits = nullptr; }
+    return S_OK;
+}
+
 struct D3DCLIPSTATUS8 {
     DWORD ClipUnion;
     DWORD ClipIntersection;
@@ -404,6 +507,12 @@ typedef enum _D3DRENDERSTATETYPE {
     D3DRS_POSITIONORDER             = 172,
     D3DRS_NORMALORDER               = 173,
 } D3DRENDERSTATETYPE;
+
+// D3DCOLORWRITEENABLE — bitmask values for D3DRS_COLORWRITEENABLE render state.
+#define D3DCOLORWRITEENABLE_RED     (1L<<0)
+#define D3DCOLORWRITEENABLE_GREEN   (1L<<1)
+#define D3DCOLORWRITEENABLE_BLUE    (1L<<2)
+#define D3DCOLORWRITEENABLE_ALPHA   (1L<<3)
 
 // ---------------------------------------------------------------------------
 // Section 7 — Texture stage state types
@@ -1041,6 +1150,34 @@ struct D3DSURFACE_DESC {
     UINT                Width;
     UINT                Height;
 };
+
+// Out-of-line definitions for the D3D compat interface methods that take
+// D3DSURFACE_DESC (declared inline above where the struct is still opaque).
+inline HRESULT IDirect3DSurface8::GetDesc(D3DSURFACE_DESC* pDesc)
+{
+    if (pDesc) { *pDesc = D3DSURFACE_DESC{}; }
+    return S_OK;
+}
+
+inline HRESULT IDirect3DTexture8::GetSurfaceLevel(UINT /*level*/, IDirect3DSurface8** ppSurface)
+{
+    if (ppSurface) *ppSurface = nullptr;
+    return S_OK;
+}
+
+inline HRESULT IDirect3DTexture8::GetLevelDesc(UINT /*level*/, D3DSURFACE_DESC* pDesc)
+{
+    if (pDesc) { *pDesc = D3DSURFACE_DESC{}; }
+    return S_OK;
+}
+
+inline HRESULT IDirect3DTexture8::LockRect(UINT /*level*/, D3DLOCKED_RECT* pLockedRect, const RECT* /*pRect*/, DWORD /*flags*/)
+{
+    if (pLockedRect) { pLockedRect->Pitch = 0; pLockedRect->pBits = nullptr; }
+    return S_OK;
+}
+
+inline HRESULT IDirect3DTexture8::UnlockRect(UINT /*level*/) { return S_OK; }
 
 struct D3DVERTEXBUFFER_DESC {
     D3DFORMAT   Format;

@@ -50,6 +50,9 @@
 
 //-----------------------------------------------------------------------------
 // srj sez: hack festival :-(
+// GameMemory.h also defines this class; the local definition only applies on
+// Windows where GameMemory.h isn't transitively included by the PCH.
+#ifdef _WIN32
 class STLSpecialAlloc
 {
 public:
@@ -57,6 +60,7 @@ public:
   static void*  allocate(size_t __n) {  return ::operator new(__n); }
   static void deallocate(void* __p, size_t) { ::operator delete(__p); }
 };
+#endif
 
 
 #include "w3d_dep.h"

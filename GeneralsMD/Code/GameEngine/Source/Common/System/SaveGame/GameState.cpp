@@ -59,6 +59,11 @@
 #include "GameLogic/SidesList.h"
 #include "GameLogic/TerrainLogic.h"
 
+#ifndef _WIN32
+#include <filesystem>
+#include <system_error>
+#endif
+
 
 // PUBLIC DATA ////////////////////////////////////////////////////////////////////////////////////
 GameState *TheGameState = nullptr;
@@ -1267,6 +1272,7 @@ void GameState::iterateSaveFiles( IterateSaveFileCallback callback, void *userDa
 	if( callback == nullptr )
 		return;
 
+#ifdef _WIN32
 	// save the current directory
 	char currentDirectory[ _MAX_PATH ];
 	GetCurrentDirectory( _MAX_PATH, currentDirectory );
@@ -1327,6 +1333,27 @@ void GameState::iterateSaveFiles( IterateSaveFileCallback callback, void *userDa
 
 	// restore the current directory
 	SetCurrentDirectory( currentDirectory );
+#else
+	// POSIX/std::filesystem fallback — iterate .sav files in the save directory.
+	std::error_code ec;
+	std::filesystem::path saveDir = getSaveDirectory().str();
+	if ( !std::filesystem::exists( saveDir, ec ) || ec )
+		return;
+	for ( auto const& entry : std::filesystem::directory_iterator( saveDir, ec ) )
+	{
+		if ( ec ) break;
+		if ( !entry.is_regular_file() )
+			continue;
+		auto name = entry.path().filename().string();
+		const char* c = strrchr( name.c_str(), '.' );
+		if ( c && stricmp( c, ".sav" ) == 0 )
+		{
+			AsciiString filename;
+			filename.set( name.c_str() );
+			callback( filename, userData );
+		}
+	}
+#endif
 
 }
 

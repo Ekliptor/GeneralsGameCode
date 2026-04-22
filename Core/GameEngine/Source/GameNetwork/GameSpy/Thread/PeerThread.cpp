@@ -1125,7 +1125,11 @@ void checkQR2Queries( PEER peer, SOCKET sock )
 {
 	static char indata[INBUF_LEN];
 	struct sockaddr_in saddr;
+#ifdef _WIN32
 	int saddrlen = sizeof(struct sockaddr_in);
+#else
+	socklen_t saddrlen = sizeof(struct sockaddr_in);
+#endif
 	fd_set set;
 	struct timeval timeout = {0,0};
 	int error;

@@ -131,6 +131,11 @@ int ReplaySimulation::simulateReplaysInThisProcess(const std::vector<AsciiString
 
 int ReplaySimulation::simulateReplaysInWorkerProcesses(const std::vector<AsciiString> &filenames, int maxProcesses)
 {
+#ifndef _WIN32
+	// WorkerProcess relies on Win32 CreateProcessW/pipes; the multi-process
+	// replay harness isn't ported yet, so fall back to sequential simulation.
+	return simulateReplaysInThisProcess(filenames);
+#else
 	DWORD totalStartTimeMillis = GetTickCount();
 
 	WideChar exePath[1024];
@@ -201,6 +206,7 @@ int ReplaySimulation::simulateReplaysInWorkerProcesses(const std::vector<AsciiSt
 	fflush(stdout);
 
 	return numErrors != 0 ? 1 : 0;
+#endif
 }
 
 std::vector<AsciiString> ReplaySimulation::resolveFilenameWildcards(const std::vector<AsciiString> &filenames)

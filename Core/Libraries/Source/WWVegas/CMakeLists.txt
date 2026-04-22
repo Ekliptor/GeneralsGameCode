@@ -8,7 +8,7 @@ target_compile_definitions(core_wwcommon INTERFACE
 
 target_link_libraries(core_wwcommon INTERFACE
     $<$<STREQUAL:${RTS_RENDERER_LOWER},dx8>:d3d8lib>
-    milesstub
+    $<$<STREQUAL:${RTS_AUDIO_LOWER},miles>:milesstub>
     stlport
 )
 

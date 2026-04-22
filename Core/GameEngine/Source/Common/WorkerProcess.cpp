@@ -19,6 +19,8 @@
 #include "PreRTS.h"	// This must go first in EVERY cpp file in the GameEngine
 #include "Common/WorkerProcess.h"
 
+#ifdef _WIN32
+
 // We need Job-related functions, but these aren't defined in the Windows-headers that VC6 uses.
 // So we define them here and load them dynamically.
 #if defined(_MSC_VER) && _MSC_VER < 1300
@@ -229,3 +231,4 @@ void WorkerProcess::kill()
 	m_isDone = false;
 }
 
+#endif // _WIN32

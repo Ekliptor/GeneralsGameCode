@@ -372,8 +372,10 @@ UDP::sockStat UDP::GetStatus()
       return ALREADY;
     case EAGAIN:
       return AGAIN;
+#if EWOULDBLOCK != EAGAIN
     case EWOULDBLOCK:
       return WOULDBLOCK;
+#endif
     case EBADF:
       return BADF;
     default:
@@ -504,7 +506,12 @@ Int UDP::SetOutputBuffer(UnsignedInt bytes)
 
 int UDP::GetInputBuffer()
 {
-   int retval,arg=0,len=sizeof(int);
+   int retval,arg=0;
+#ifdef _WIN32
+   int len=sizeof(int);
+#else
+   socklen_t len=sizeof(int);
+#endif
 
    retval=getsockopt(fd,SOL_SOCKET,SO_RCVBUF,
      (char *)&arg,&len);
@@ -514,7 +521,12 @@ int UDP::GetInputBuffer()
 
 int UDP::GetOutputBuffer()
 {
-   int retval,arg=0,len=sizeof(int);
+   int retval,arg=0;
+#ifdef _WIN32
+   int len=sizeof(int);
+#else
+   socklen_t len=sizeof(int);
+#endif
 
    retval=getsockopt(fd,SOL_SOCKET,SO_SNDBUF,
      (char *)&arg,&len);

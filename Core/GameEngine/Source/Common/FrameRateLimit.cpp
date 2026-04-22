@@ -19,19 +19,30 @@
 #include "PreRTS.h"
 #include "Common/FrameRateLimit.h"
 
+#ifndef _WIN32
+#include <chrono>
+#include <thread>
+#endif
 
 FrameRateLimit::FrameRateLimit()
 {
+#ifdef _WIN32
 	LARGE_INTEGER freq;
 	LARGE_INTEGER start;
 	QueryPerformanceFrequency(&freq);
 	QueryPerformanceCounter(&start);
 	m_freq = freq.QuadPart;
 	m_start = start.QuadPart;
+#else
+	// steady_clock ticks in nanoseconds on macOS/Linux; use that as the unit.
+	m_freq = 1000000000LL;
+	m_start = (Int64)std::chrono::steady_clock::now().time_since_epoch().count();
+#endif
 }
 
 Real FrameRateLimit::wait(UnsignedInt maxFps)
 {
+#ifdef _WIN32
 	LARGE_INTEGER tick;
 	QueryPerformanceCounter(&tick);
 	double elapsedSeconds = static_cast<double>(tick.QuadPart - m_start) / m_freq;
@@ -55,6 +66,27 @@ Real FrameRateLimit::wait(UnsignedInt maxFps)
 
 	m_start = tick.QuadPart;
 	return (Real)elapsedSeconds;
+#else
+	auto now = std::chrono::steady_clock::now();
+	Int64 tick = (Int64)now.time_since_epoch().count();
+	double elapsedSeconds = static_cast<double>(tick - m_start) / m_freq;
+	const double targetSeconds = 1.0 / maxFps;
+	const double sleepSeconds = targetSeconds - elapsedSeconds - 0.002;
+
+	if (sleepSeconds > 0.0)
+		std::this_thread::sleep_for(std::chrono::microseconds((long long)(sleepSeconds * 1e6)));
+
+	do
+	{
+		now = std::chrono::steady_clock::now();
+		tick = (Int64)now.time_since_epoch().count();
+		elapsedSeconds = static_cast<double>(tick - m_start) / m_freq;
+	}
+	while (elapsedSeconds < targetSeconds);
+
+	m_start = tick;
+	return (Real)elapsedSeconds;
+#endif
 }
 
 

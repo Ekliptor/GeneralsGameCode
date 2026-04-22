@@ -2131,3 +2131,82 @@ void WW3D::Set_Gamma(float gamma,float bright,float contrast,bool calibrate)
 	DX8Wrapper::Set_Gamma(gamma,bright,contrast,calibrate);
 }
 #endif // RTS_RENDERER_DX8
+
+#ifndef RTS_RENDERER_DX8
+// Phase 5h — WW3D static data & method stubs for the bgfx build. bgfx owns
+// its own render pipeline; this file just provides symbols so the legacy
+// W3D-based init/render callsites link. All state getters return neutral
+// values and setters are no-ops.
+#include "ww3d.h"
+#include "shader.h"
+#include "rddesc.h"
+
+// Note: some WW3D statics already live above the DX8 gate (SyncTime,
+// PreviousSyncTime, IsInitted, IsRendering, FrameCount, ThumbnailEnabled).
+// Others (PrelitMode, MeshDrawMode, NPatchesGapFillingMode) live inside the
+// gate — define them here only when not in DX8.
+
+float WW3D::LogicFrameTimeMs = 0.0f;
+float WW3D::FractionalSyncMs = 0.0f;
+float WW3D::PixelCenterX = 0.0f;
+float WW3D::PixelCenterY = 0.0f;
+bool WW3D::IsCapturing = false;
+bool WW3D::IsSortingEnabled = true;
+bool WW3D::IsScreenUVBiased = false;
+bool WW3D::IsBackfaceDebugEnabled = false;
+bool WW3D::AreDecalsEnabled = false;
+float WW3D::DecalRejectionDistance = 0.0f;
+bool WW3D::AreStaticSortListsEnabled = false;
+bool WW3D::MungeSortOnLoad = false;
+bool WW3D::OverbrightModifyOnLoad = false;
+FrameGrabClass* WW3D::Movie = nullptr;
+bool WW3D::PauseRecord = false;
+bool WW3D::RecordNextFrame = false;
+VertexMaterialClass* WW3D::DefaultDebugMaterial = nullptr;
+VertexMaterialClass* WW3D::BackfaceDebugMaterial = nullptr;
+WW3D::PrelitModeEnum WW3D::PrelitMode = WW3D::PRELIT_MODE_VERTEX;
+bool WW3D::ExposePrelit = false;
+int WW3D::TextureFilter = 0;
+bool WW3D::SnapshotActivated = false;
+WW3D::MeshDrawModeEnum WW3D::MeshDrawMode = WW3D::MESH_DRAW_MODE_OLD;
+WW3D::NPatchesGapFillingModeEnum WW3D::NPatchesGapFillingMode = WW3D::NPATCHES_GAP_FILLING_DISABLED;
+unsigned WW3D::NPatchesLevel = 0;
+bool WW3D::IsTexturingEnabled = true;
+bool WW3D::IsColoringEnabled = false;
+bool WW3D::Lite = false;
+float WW3D::DefaultNativeScreenSize = 800.0f;
+StaticSortListClass* WW3D::DefaultStaticSortLists = nullptr;
+StaticSortListClass* WW3D::CurrentStaticSortLists = nullptr;
+int WW3D::LastFrameMemoryAllocations = 0;
+int WW3D::LastFrameMemoryFrees = 0;
+long WW3D::UserStat0 = 0;
+long WW3D::UserStat1 = 0;
+long WW3D::UserStat2 = 0;
+ShaderClass WW3D::DefaultDebugShader;
+ShaderClass WW3D::LightmapDebugShader;
+
+WW3DErrorType WW3D::Init(void* /*hwnd*/, char* /*defaultpal*/, bool /*lite*/) { IsInitted = true; return WW3D_ERROR_OK; }
+WW3DErrorType WW3D::Shutdown() { IsInitted = false; return WW3D_ERROR_OK; }
+WW3DErrorType WW3D::Begin_Render(bool, bool, const Vector3&, float, void(*)()) { IsRendering = true; return WW3D_ERROR_OK; }
+WW3DErrorType WW3D::End_Render(bool) { IsRendering = false; return WW3D_ERROR_OK; }
+void WW3D::Flush(RenderInfoClass&) {}
+WW3DErrorType WW3D::Render(SceneClass*, CameraClass*, bool, bool, const Vector3&) { return WW3D_ERROR_OK; }
+WW3DErrorType WW3D::Render(RenderObjClass&, RenderInfoClass&) { return WW3D_ERROR_OK; }
+void WW3D::Sync(bool) {}
+void WW3D::Update_Logic_Frame_Time(float ms) { LogicFrameTimeMs = ms; }
+WW3DErrorType WW3D::Set_Device_Resolution(int, int, int, int, bool) { return WW3D_ERROR_OK; }
+WW3DErrorType WW3D::Set_Render_Device(int, int, int, int, int, bool, bool, bool) { return WW3D_ERROR_OK; }
+void WW3D::Get_Device_Resolution(int& w, int& h, int& bits, bool& windowed) { w = h = bits = 0; windowed = true; }
+void WW3D::Get_Render_Target_Resolution(int& w, int& h, int& bits, bool& windowed) { w = h = bits = 0; windowed = true; }
+const RenderDeviceDescClass& WW3D::Get_Render_Device_Desc(int) { static RenderDeviceDescClass d; return d; }
+int  WW3D::Get_Texture_Bitdepth() { return 32; }
+void WW3D::Set_Texture_Bitdepth(int) {}
+void WW3D::Set_Texture_Reduction(int, int) {}
+void WW3D::Set_MSAA_Mode(MultiSampleModeEnum) {}
+void WW3D::Set_Collision_Box_Display_Mask(int) {}
+void WW3D::Enable_Texturing(bool b) { IsTexturingEnabled = b; }
+void WW3D::Enable_Coloring(unsigned int c) { IsColoringEnabled = (c != 0); }
+void WW3D::Add_To_Static_Sort_List(RenderObjClass*, unsigned int) {}
+void WW3D::Render_And_Clear_Static_Sort_Lists(RenderInfoClass&) {}
+void WW3D::Toggle_Movie_Capture(const char*, float) {}
+#endif // !RTS_RENDERER_DX8

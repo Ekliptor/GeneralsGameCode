@@ -984,6 +984,7 @@ static Bool isAgeOkay(AsciiString &month, AsciiString &day, AsciiString year)
 
 	// test the year first
 	#define DATE_BUFFER_SIZE 256
+#ifdef _WIN32
 	char dateBuffer[ DATE_BUFFER_SIZE ];
 	GetDateFormat( LOCALE_SYSTEM_DEFAULT,
 								 0, nullptr,
@@ -1017,6 +1018,23 @@ static Bool isAgeOkay(AsciiString &month, AsciiString &day, AsciiString year)
 		return FALSE;
 //	day.format("%02.2d",userVal);
 	return TRUE;
+#else
+	// POSIX equivalent using time()/localtime_r.
+	time_t now = time(nullptr);
+	struct tm lt; localtime_r(&now, &lt);
+	Int sysYear  = lt.tm_year + 1900;
+	Int sysMonth = lt.tm_mon + 1;
+	Int sysDay   = lt.tm_mday;
+	Int userYear  = atoi(year.str());
+	Int userMonth = atoi(month.str());
+	Int userDay   = atoi(day.str());
+	if (sysYear - userYear >= 14) return TRUE;
+	if (sysYear - userYear <= 12) return FALSE;
+	if (sysMonth - userMonth > 0) return TRUE;
+	if (sysMonth - userMonth < 0) return FALSE;
+	if (sysDay - userDay < 0) return FALSE;
+	return TRUE;
+#endif
 }
 
 //-------------------------------------------------------------------------------------------------

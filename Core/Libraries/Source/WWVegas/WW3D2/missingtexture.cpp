@@ -18,6 +18,9 @@
 
 // 08/05/02 KM Texture class redesign
 #include "missingtexture.h"
+#ifndef _WIN32
+#include "compat/d3d8.h"
+#endif
 
 // Phase 5h.22 — the _MissingTexture pointer + its accessor live outside the
 // RTS_RENDERER_DX8 guard so TextureBaseClass::Is_Missing_Texture (which calls

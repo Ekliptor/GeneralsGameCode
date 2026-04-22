@@ -16,6 +16,9 @@
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 #include "Lib/BaseType.h"
+#ifndef _WIN32
+#include <Utility/osdep.h>
+#endif
 
 namespace rts
 {

@@ -233,7 +233,11 @@ static Int roundUpMemBound(Int i)
 */
 static void* sysAllocateDoNotZero(Int numBytes)
 {
+#ifdef _WIN32
 	void* p = ::GlobalAlloc(GMEM_FIXED, numBytes);
+#else
+	void* p = ::malloc(numBytes);
+#endif
 	if (!p)
 		throw ERROR_OUT_OF_MEMORY;
 #ifdef MEMORYPOOL_DEBUG
@@ -269,7 +273,11 @@ static void sysFree(void* p)
 			theTotalSystemAllocationInBytes -= ::GlobalSize(p);
 		}
 #endif
+#ifdef _WIN32
 		::GlobalFree(p);
+#else
+		::free(p);
+#endif
 	}
 }
 

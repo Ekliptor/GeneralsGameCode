@@ -84,7 +84,7 @@ Bool GetLocalChatConnectionAddress(AsciiString serverName,
 	const EnumeratedIP *ip = enumer.getAddresses();
 	while (ip != nullptr)
 	{
-		const UnsignedInt candidate = ip->getIP();
+		const UnsignedInt candidate = const_cast<EnumeratedIP *>(ip)->getIP();
 		if (candidate != 0 && (candidate & 0xff000000) != 0x7f000000)
 		{
 			localIP = htonl(candidate);

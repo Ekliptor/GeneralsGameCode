@@ -34,6 +34,9 @@
 #pragma once
 
 #include "WW3D2/texture.h"
+#ifndef _WIN32
+#include "WW3D2/compat/d3d8.h"
+#endif
 enum FilterTypes CPP_11(: Int);
 enum FilterModes CPP_11(: Int);
 enum CustomScenePassModes CPP_11(: Int);

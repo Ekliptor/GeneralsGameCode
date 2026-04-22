@@ -36,8 +36,10 @@ static void drawFramerateBar();
 // SYSTEM INCLUDES ////////////////////////////////////////////////////////////
 #include <numeric>
 #include <stdlib.h>
+#ifdef _WIN32
 #include <windows.h>
 #include <io.h>
+#endif
 #include <time.h>
 
 // USER INCLUDES //////////////////////////////////////////////////////////////
@@ -700,8 +702,13 @@ void W3DDisplay::init()
 		{
 			SortingRendererClass::SetMinVertexBufferSize(1);
 		}
+#ifdef _WIN32
 		if (WW3D::Init( ApplicationHWnd ) != WW3D_ERROR_OK)
 			throw ERROR_INVALID_D3D;	//failed to initialize.  User probably doesn't have DX 8.1
+#else
+		if (WW3D::Init( nullptr ) != WW3D_ERROR_OK)
+			throw ERROR_INVALID_D3D;	//failed to initialize.
+#endif
 
 		WW3D::Set_Prelit_Mode( WW3D::PRELIT_MODE_LIGHTMAP_MULTI_PASS );
 		WW3D::Set_Collision_Box_Display_Mask(0x00);	///<set to 0xff to make collision boxes visible
@@ -1661,10 +1668,12 @@ void W3DDisplay::draw()
 {
 	//USE_PERF_TIMER(W3DDisplay_draw)
 
+#ifdef _WIN32
 	extern HWND ApplicationHWnd;
 	if (ApplicationHWnd && ::IsIconic(ApplicationHWnd)) {
 		return;
 	}
+#endif
 
 	if (TheGlobalData->m_headless)
 		return;
@@ -1801,7 +1810,11 @@ AGAIN:
 	do {
 
 		// update all views of the world - recomputes data which will affect drawing
+#ifdef RTS_RENDERER_DX8
 		if (DX8Wrapper::_Get_D3D_Device8() && (DX8Wrapper::_Get_D3D_Device8()->TestCooperativeLevel()) == D3D_OK)
+#else
+		if (true)
+#endif
 		{	//Checking if we have the device before updating views because the heightmap crashes otherwise while
 			//trying to refresh the visible terrain geometry.
 //			if(TheGlobalData->m_loadScreenRender != TRUE)
@@ -2917,6 +2930,7 @@ void W3DDisplay::setShroudLevel( Int x, Int y, CellShroudStatus setting )
 }
 
 //=============================================================================
+#ifdef _WIN32
 ///Utility function to dump data into a .BMP file
 static void CreateBMPFile(LPTSTR pszFile, char *image, Int width, Int height)
 {
@@ -2992,10 +3006,17 @@ static void CreateBMPFile(LPTSTR pszFile, char *image, Int width, Int height)
 	// Free memory.
 	LocalFree( (HLOCAL) pbmi);
 }
+#else
+static void CreateBMPFile(const char* /*pszFile*/, char* /*image*/, Int /*width*/, Int /*height*/) { /* TODO: non-Windows BMP writer */ }
+#endif
 
 ///Save Screen Capture to a file
 void W3DDisplay::takeScreenShot()
 {
+#ifndef _WIN32
+	// TODO: implement screenshot for SDL/macOS path
+	return;
+#else
 	char leafname[256];
 	char pathname[1024];
 
@@ -3129,6 +3150,7 @@ void W3DDisplay::takeScreenShot()
 	UnicodeString ufileName;
 	ufileName.translate(leafname);
 	TheInGameUI->message(TheGameText->fetch("GUI:ScreenCapture"), ufileName.str());
+#endif // _WIN32
 }
 
 /** Start/Stop capturing an AVI movie*/

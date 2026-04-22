@@ -47,7 +47,9 @@
 
 #include "PreRTS.h"	// This must go first in EVERY cpp file in the GameEngine
 
+#ifdef _WIN32
 #include "mbstring.h"
+#endif
 
 #include "Common/Debug.h"
 #include "Common/Language.h"
@@ -66,6 +68,7 @@
 //         Externals
 //----------------------------------------------------------------------------
 
+#ifdef _WIN32
 extern HWND ApplicationHWnd;  ///< our application window handle
 extern Int	IMECandidateWindowLineSpacing;
 
@@ -1598,3 +1601,7 @@ void IMEManager::updateStatusWindow()
 
 }
 
+
+#else // !_WIN32
+#include "IMEManager_stub.inc"
+#endif // _WIN32

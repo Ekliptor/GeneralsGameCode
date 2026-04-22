@@ -341,6 +341,7 @@ void W3DProjectedShadowManager::updateRenderTargetTextures()
 ///Renders shadow on part of terrain covered by world-space bounding box.
 Int W3DProjectedShadowManager::renderProjectedTerrainShadow(W3DProjectedShadow *shadow, AABoxClass &box)
 {
+#ifdef RTS_RENDERER_DX8
 	static	Matrix4x4 mWorld(true);	//initialize to identity matrix
 	struct SHADOW_VOLUME_VERTEX	//vertex structure passed to D3D
 	{
@@ -525,6 +526,7 @@ Int W3DProjectedShadowManager::renderProjectedTerrainShadow(W3DProjectedShadow *
 		nShadowStartBatchIndex=nShadowIndicesInBuf;
 		return 1;
 	}
+#endif // RTS_RENDERER_DX8
 	return 0;
 }
 
@@ -724,11 +726,13 @@ void W3DProjectedShadowManager::flushDecals(W3DShadowTexture *texture, ShadowTyp
 */
 
 
+#ifdef RTS_RENDERER_DX8
 	m_pDev->SetIndices(shadowDecalIndexBufferD3D,nShadowDecalStartBatchVertex);
 	m_pDev->SetTransform(D3DTS_WORLD,(_D3DMATRIX *)&mWorld);
 
 	m_pDev->SetStreamSource(0,shadowDecalVertexBufferD3D,sizeof(SHADOW_DECAL_VERTEX));
 	m_pDev->SetVertexShader(SHADOW_DECAL_FVF);
+#endif
 
 //Hard Shadows using stencil
 /*	m_pDev->SetRenderState( D3DRS_SRCBLEND,  D3DBLEND_ZERO);
@@ -746,11 +750,13 @@ void W3DProjectedShadowManager::flushDecals(W3DShadowTexture *texture, ShadowTyp
 */
 //m_pDev->SetRenderState( D3DRS_ALPHABLENDENABLE, FALSE );	//useful to see bounds
 
+#ifdef RTS_RENDERER_DX8
 	if (DX8Wrapper::_Is_Triangle_Draw_Enabled())
 	{
 		Debug_Statistics::Record_DX8_Polys_And_Vertices(nShadowDecalPolysInBatch,nShadowDecalVertsInBatch,ShaderClass::_PresetOpaqueShader);
 		m_pDev->DrawIndexedPrimitive(D3DPT_TRIANGLELIST,0,nShadowDecalVertsInBatch,nShadowDecalStartBatchIndex,nShadowDecalPolysInBatch);
 	}
+#endif
 
 //	m_pDev->SetRenderState(D3DRS_ALPHATESTENABLE, FALSE);	//should reject background pixels
 //	m_pDev->SetRenderState( D3DRS_STENCILENABLE, FALSE );

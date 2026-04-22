@@ -128,15 +128,15 @@
 
 #include "hlod.h"
 
-#ifdef RTS_RENDERER_DX8
-
 #include "assetmgr.h"
 #include "hmdldef.h"
 #include "w3derr.h"
 #include "chunkio.h"
 #include "predlod.h"
 #include "rinfo.h"
+#ifdef _WIN32
 #include <win.h>
+#endif
 #include "sphere.h"
 #include "boxrobj.h"
 
@@ -3646,5 +3646,5 @@ void HLodClass::Set_Hidden(int onoff)
 	return ;
 }
 
-#endif // RTS_RENDERER_DX8
+// was: #endif // RTS_RENDERER_DX8 — gate lifted for bgfx so HLodClass/HLodLoader/HModelPrototypeClass vtables link.
 

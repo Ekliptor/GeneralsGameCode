@@ -33,6 +33,9 @@
 
 #include <atomic>
 #include <fcntl.h>
+#ifndef _WIN32
+#include <unistd.h>
+#endif
 #include <thread>
 
 #include "GameNetwork/NetworkInit.h"
@@ -153,13 +156,21 @@ static Bool hasWriteAccess()
 
 	remove(filename);
 
+#ifdef _WIN32
 	int handle = _open( filename, _O_CREAT | _O_RDWR, _S_IREAD | _S_IWRITE);
+#else
+	int handle = ::open( filename, O_CREAT | O_RDWR, 0644);
+#endif
 	if (handle == -1)
 	{
 		return false;
 	}
 
+#ifdef _WIN32
 	_close(handle);
+#else
+	::close(handle);
+#endif
 	remove(filename);
 
 	unsigned int val;
@@ -314,7 +325,7 @@ static void queuePatch(Bool mandatory, AsciiString downloadURL)
 static GHTTPBool motdCallback( GHTTPRequest request, GHTTPResult result,
 															char * buffer, GHTTPByteCount bufferLen, void * param )
 {
-	Int run = (Int)param;
+	Int run = (Int)(uintptr_t)param;
 	if (run != timeThroughOnline)
 	{
 		DEBUG_CRASH(("Old callback being called!"));
@@ -349,7 +360,7 @@ static GHTTPBool motdCallback( GHTTPRequest request, GHTTPResult result,
 static GHTTPBool configCallback( GHTTPRequest request, GHTTPResult result,
 																char * buffer, GHTTPByteCount bufferLen, void * param )
 {
-	Int run = (Int)param;
+	Int run = (Int)(uintptr_t)param;
 	if (run != timeThroughOnline)
 	{
 		DEBUG_CRASH(("Old callback being called!"));
@@ -411,7 +422,7 @@ static GHTTPBool configCallback( GHTTPRequest request, GHTTPResult result,
 static GHTTPBool configHeadCallback( GHTTPRequest request, GHTTPResult result,
 																		char * buffer, GHTTPByteCount bufferLen, void * param )
 {
-	Int run = (Int)param;
+	Int run = (Int)(uintptr_t)param;
 	if (run != timeThroughOnline)
 	{
 		DEBUG_CRASH(("Old callback being called!"));
@@ -495,7 +506,7 @@ static GHTTPBool configHeadCallback( GHTTPRequest request, GHTTPResult result,
 
 static GHTTPBool gamePatchCheckCallback( GHTTPRequest request, GHTTPResult result, char * buffer, GHTTPByteCount bufferLen, void * param )
 {
-	Int run = (Int)param;
+	Int run = (Int)(uintptr_t)param;
 	if (run != timeThroughOnline)
 	{
 		DEBUG_CRASH(("Old callback being called!"));

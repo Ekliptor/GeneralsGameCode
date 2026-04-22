@@ -69,13 +69,15 @@
 #if defined(DEBUG_STACKTRACE) || defined(IG_DEBUG_STACKTRACE)
 	#include "Common/StackDump.h"
 #endif
-#ifdef RTS_ENABLE_CRASHDUMP
+#if defined(RTS_ENABLE_CRASHDUMP) && defined(_WIN32)
 #include "Common/MiniDumper.h"
 #endif
 
 // Horrible reference, but we really, really need to know if we are windowed.
 extern bool DX8Wrapper_IsWindowed;
+#ifdef _WIN32
 extern HWND ApplicationHWnd;
+#endif
 
 extern const char *gAppPrefix; /// So WB can have a different log file name.
 
@@ -164,17 +166,25 @@ inline Bool ignoringAsserts()
 }
 
 // ----------------------------------------------------------------------------
+#ifdef _WIN32
 inline HWND getThreadHWND()
 {
 	return (theMainThreadID == GetCurrentThreadId())?ApplicationHWnd:nullptr;
 }
+#endif
 
 // ----------------------------------------------------------------------------
 
 int MessageBoxWrapper( LPCSTR lpText, LPCSTR lpCaption, UINT uType )
 {
+#ifdef _WIN32
 	HWND threadHWND = getThreadHWND();
 	return ::MessageBox(threadHWND, lpText, lpCaption, uType);
+#else
+	// No modal message box on non-Windows — log to stderr and return IDOK.
+	fprintf(stderr, "[%s] %s\n", lpCaption ? lpCaption : "Debug", lpText ? lpText : "");
+	return 1; // IDOK
+#endif
 }
 
 // ----------------------------------------------------------------------------
@@ -732,7 +742,7 @@ double SimpleProfiler::getAverageTime()
 
 static void TriggerMiniDump()
 {
-#ifdef RTS_ENABLE_CRASHDUMP
+#if defined(RTS_ENABLE_CRASHDUMP) && defined(_WIN32)
 	if (TheMiniDumper && TheMiniDumper->IsInitialized())
 	{
 		// Create both minimal and full memory dumps
@@ -749,11 +759,13 @@ void ReleaseCrash(const char *reason)
 {
 	/// do additional reporting on the crash, if possible
 
+#ifdef _WIN32
 	if (!DX8Wrapper_IsWindowed) {
 		if (ApplicationHWnd) {
 			ShowWindow(ApplicationHWnd, SW_HIDE);
 		}
 	}
+#endif
 
 	TriggerMiniDump();
 
@@ -799,11 +811,13 @@ void ReleaseCrash(const char *reason)
 		theReleaseCrashLogFile = nullptr;
 	}
 
+#ifdef _WIN32
 	if (!DX8Wrapper_IsWindowed) {
 		if (ApplicationHWnd) {
 			ShowWindow(ApplicationHWnd, SW_HIDE);
 		}
 	}
+#endif
 
 #if defined(RTS_DEBUG)
 	/* static */ char buff[8192]; // not so static so we can be threadsafe
@@ -841,11 +855,13 @@ void ReleaseCrashLocalized(const AsciiString& p, const AsciiString& m)
 
 	/// do additional reporting on the crash, if possible
 
+#ifdef _WIN32
 	if (!DX8Wrapper_IsWindowed) {
 		if (ApplicationHWnd) {
 			ShowWindow(ApplicationHWnd, SW_HIDE);
 		}
 	}
+#endif
 
 	::MessageBoxW(nullptr, mesg.str(), prompt.str(), MB_OK | MB_SYSTEMMODAL | MB_ICONERROR);
 

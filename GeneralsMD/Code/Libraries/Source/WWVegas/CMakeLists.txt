@@ -4,7 +4,7 @@ add_library(z_wwcommon INTERFACE)
 target_link_libraries(z_wwcommon INTERFACE
     core_wwcommon
     $<$<STREQUAL:${RTS_RENDERER_LOWER},dx8>:d3d8lib>
-    milesstub
+    $<$<STREQUAL:${RTS_AUDIO_LOWER},miles>:milesstub>
     stlport
 )
 

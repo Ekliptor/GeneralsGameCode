@@ -38,6 +38,7 @@ bool ClientInstance::initialize()
 		return true;
 	}
 
+#ifdef _WIN32
 	// Create a mutex with a unique name to Generals in order to determine if our app is already running.
 	// WARNING: DO NOT use this number for any other application except Generals.
 	while (true)
@@ -80,6 +81,11 @@ bool ClientInstance::initialize()
 		}
 		break;
 	}
+#else
+	// POSIX: single-instance detection is not implemented — let every instance
+	// run. Set a sentinel so isInitialized() returns true.
+	s_mutexHandle = reinterpret_cast<HANDLE>(1);
+#endif
 
 	return true;
 }

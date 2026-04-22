@@ -26,8 +26,10 @@
 // John McDonald, December 2002
 ////////////////////////////////////////////////////////////
 
+#ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#endif
 #include "Common/OSDisplay.h"
 
 #include "Common/SubsystemInterface.h"
@@ -38,9 +40,12 @@
 
 
 
+#ifdef _WIN32
 extern HWND ApplicationHWnd;
+#endif
 
 //-------------------------------------------------------------------------------------------------
+#ifdef _WIN32
 static void RTSFlagsToOSFlags(UnsignedInt buttonFlags, UnsignedInt otherFlags, UnsignedInt& outWindowsFlags)
 {
 	outWindowsFlags = 0;
@@ -116,3 +121,16 @@ void OSDisplaySetBusyState(Bool busyDisplay, Bool busySystem)
 
 	::SetThreadExecutionState(state);
 }
+#else // !_WIN32
+//-------------------------------------------------------------------------------------------------
+// TODO: surface native macOS dialog (NSAlert) / linux GTK dialog here.
+OSDisplayButtonType OSDisplayWarningBox(AsciiString /*p*/, AsciiString /*m*/, UnsignedInt /*buttonFlags*/, UnsignedInt /*otherFlags*/)
+{
+	return OSDBT_CANCEL;
+}
+
+void OSDisplaySetBusyState(Bool /*busyDisplay*/, Bool /*busySystem*/)
+{
+	// no-op; macOS manages display sleep via IOPMAssertion, linux via inhibit.
+}
+#endif // _WIN32
