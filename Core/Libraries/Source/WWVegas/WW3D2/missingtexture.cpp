@@ -722,3 +722,56 @@ unsigned int missing_image_pixels[]={
 0xA7A7A7A7,0xA7A7A7A7,0xA7A7A7A7,0xA7A7A7A7,0xA7A7A7A7,0xA7A7A7A7,0xA7A7A7A7,0xA7A7A7A7,
 0xA7A7A7A7,0xA7A7A7A7,0xA7A7A7A7,0xA7A7A7A7,0xA7A7A7A7,0xA7A7A7A7,0x15151515,0x15151515};
 #endif // RTS_RENDERER_DX8
+
+#ifndef RTS_RENDERER_DX8
+// ---------------------------------------------------------------------------
+// bgfx-mode implementation. Builds a 16×16 magenta/gray RGBA8 checkerboard and
+// uploads it via the active render backend. The resulting handle is retained
+// here for future fallback use (e.g. a bgfx-native Is_Missing_Texture path);
+// _Get_Missing_Texture() still returns nullptr because it hands back the
+// DX8-typed pointer, which no bgfx caller actually dereferences.
+// ToDo Phase 5h+: surface a bgfx-typed accessor so TextureClass::Init() can
+// fall back to this handle when BgfxTextureCache::Get_Or_Load_File fails.
+
+#include "RenderBackendRuntime.h"
+#include "IRenderBackend.h"
+#include <cstdint>
+
+static uintptr_t _MissingTextureBgfxHandle = 0;
+
+void MissingTexture::_Init()
+{
+	if (_MissingTextureBgfxHandle != 0) return;
+	IRenderBackend* backend = RenderBackendRuntime::Get_Active();
+	if (!backend) return;
+
+	constexpr uint16_t kSize = 16;
+	uint8_t pixels[kSize * kSize * 4];
+	for (uint16_t y = 0; y < kSize; ++y) {
+		for (uint16_t x = 0; x < kSize; ++x) {
+			const bool on = ((x >> 2) ^ (y >> 2)) & 1;
+			const size_t i = (static_cast<size_t>(y) * kSize + x) * 4;
+			pixels[i + 0] = on ? 0xFF : 0x40;  // R
+			pixels[i + 1] = on ? 0x00 : 0x40;  // G
+			pixels[i + 2] = on ? 0xFF : 0x40;  // B
+			pixels[i + 3] = 0xFF;               // A
+		}
+	}
+	_MissingTextureBgfxHandle = backend->Create_Texture_RGBA8(pixels, kSize, kSize, /*mipmap=*/false);
+}
+
+void MissingTexture::_Deinit()
+{
+	if (_MissingTextureBgfxHandle == 0) return;
+	if (IRenderBackend* backend = RenderBackendRuntime::Get_Active()) {
+		backend->Destroy_Texture(_MissingTextureBgfxHandle);
+	}
+	_MissingTextureBgfxHandle = 0;
+}
+
+IDirect3DSurface8* MissingTexture::_Create_Missing_Surface()
+{
+	// Surface-level access is not wired for bgfx; callers already null-check.
+	return nullptr;
+}
+#endif // !RTS_RENDERER_DX8

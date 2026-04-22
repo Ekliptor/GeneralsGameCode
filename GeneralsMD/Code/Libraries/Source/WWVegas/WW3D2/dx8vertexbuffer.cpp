@@ -160,6 +160,7 @@ VertexBufferClass::WriteLockClass::WriteLockClass(VertexBufferClass* VertexBuffe
 		DX8_Assert();
 		{
 		auto* dxVB = static_cast<DX8VertexBufferClass*>(VertexBuffer);
+#ifdef RTS_RENDERER_DX8
 		DX8_ErrorCode(dxVB->Get_DX8_Vertex_Buffer()->Lock(
 			0,
 			0,
@@ -169,6 +170,10 @@ VertexBufferClass::WriteLockClass::WriteLockClass(VertexBufferClass* VertexBuffe
 		// (compat-shim stub in bgfx mode). DX8 mode gets real GPU memory
 		// here and never reads the shadow.
 		if (Vertices == nullptr) Vertices = dxVB->Get_Cpu_Shadow();
+#else
+		(void)flags;
+		Vertices = dxVB->Get_Cpu_Shadow();
+#endif
 		}
 		break;
 	case BUFFER_TYPE_SORTING:
@@ -191,7 +196,9 @@ VertexBufferClass::WriteLockClass::~WriteLockClass()
 		WWDEBUG_SAY(("VertexBuffer->Unlock()"));
 #endif
 		DX8_Assert();
+#ifdef RTS_RENDERER_DX8
 		DX8_ErrorCode(static_cast<DX8VertexBufferClass*>(VertexBuffer)->Get_DX8_Vertex_Buffer()->Unlock());
+#endif
 		break;
 	case BUFFER_TYPE_SORTING:
 		break;
@@ -234,6 +241,7 @@ VertexBufferClass::AppendLockClass::AppendLockClass(VertexBufferClass* VertexBuf
 		{
 		auto* dxVB = static_cast<DX8VertexBufferClass*>(VertexBuffer);
 		const unsigned fvfSize = VertexBuffer->FVF_Info().Get_FVF_Size();
+#ifdef RTS_RENDERER_DX8
 		DX8_ErrorCode(dxVB->Get_DX8_Vertex_Buffer()->Lock(
 			start_index*fvfSize,
 			index_range*fvfSize,
@@ -245,6 +253,11 @@ VertexBufferClass::AppendLockClass::AppendLockClass(VertexBufferClass* VertexBuf
 			if (auto* shadow = dxVB->Get_Cpu_Shadow())
 				Vertices = shadow + start_index * fvfSize;
 		}
+#else
+		(void)index_range;
+		if (auto* shadow = dxVB->Get_Cpu_Shadow())
+			Vertices = shadow + start_index * fvfSize;
+#endif
 		}
 		break;
 	case BUFFER_TYPE_SORTING:
@@ -267,7 +280,9 @@ VertexBufferClass::AppendLockClass::~AppendLockClass()
 #ifdef VERTEX_BUFFER_LOG
 		WWDEBUG_SAY(("VertexBuffer->Unlock()"));
 #endif
+#ifdef RTS_RENDERER_DX8
 		DX8_ErrorCode(static_cast<DX8VertexBufferClass*>(VertexBuffer)->Get_DX8_Vertex_Buffer()->Unlock());
+#endif
 		break;
 	case BUFFER_TYPE_SORTING:
 		break;
@@ -434,7 +449,7 @@ DX8VertexBufferClass::~DX8VertexBufferClass()
 	_DX8VertexBufferCount--;
 	WWDEBUG_SAY(("Current vertex buffer count: %d",_DX8VertexBufferCount));
 #endif
-	VertexBuffer->Release();
+	if (VertexBuffer) VertexBuffer->Release();
 	// Phase 5h.18
 	delete[] m_cpuShadow;
 	m_cpuShadow = nullptr;
@@ -465,6 +480,7 @@ void DX8VertexBufferClass::Create_Vertex_Buffer(UsageType usage)
 	WWDEBUG_SAY(("Current vertex buffer count: %d",_DX8VertexBufferCount));
 #endif
 
+#ifdef RTS_RENDERER_DX8
 	unsigned usage_flags=
 		D3DUSAGE_WRITEONLY|
 		((usage&USAGE_DYNAMIC) ? D3DUSAGE_DYNAMIC : 0)|
@@ -494,16 +510,10 @@ void DX8VertexBufferClass::Create_Vertex_Buffer(UsageType usage)
 	// Vertex buffer creation failed, so try releasing least used textures and flushing the mesh cache.
 
 	// Free all textures that haven't been used in the last 5 seconds
-	// Phase 5h.23 — TextureClass::Invalidate_Old_Unused_Textures now linkable
-	// in bgfx mode (null-guards Get_Instance()); the 5h.15 surgical #ifdef
-	// here is no longer needed. WW3D::_Invalidate_Mesh_Cache is still DX8-only;
-	// guard just that call.
 	TextureClass::Invalidate_Old_Unused_Textures(5000);
 
-#ifdef RTS_RENDERER_DX8
 	// Invalidate the mesh cache
 	WW3D::_Invalidate_Mesh_Cache();
-#endif
 
 	//@todo: Find some way to invalidate the textures too
 	ret = DX8Wrapper::_Get_D3D_Device8()->ResourceManagerDiscardBytes(0);
@@ -522,6 +532,11 @@ void DX8VertexBufferClass::Create_Vertex_Buffer(UsageType usage)
 
 	// If it still fails it is fatal
 	DX8_ErrorCode(ret);
+#else
+	(void)usage;
+	// bgfx mode: no GPU VB created here — CPU shadow holds everything.
+	VertexBuffer = nullptr;
+#endif
 
 	// Phase 5h.18 — allocate CPU shadow once the size is known. Sized by the
 	// final FVF size; the VB's VertexCount is already locked in by the base
@@ -903,12 +918,29 @@ DynamicVBAccessClass::WriteLockClass::WriteLockClass(DynamicVBAccessClass* dynam
 //		WWASSERT(!_DynamicDX8VertexBuffer->Engine_Refs());
 
 		DX8_Assert();
+		{
+		auto* dxVB = static_cast<DX8VertexBufferClass*>(DynamicVBAccess->VertexBuffer);
+		const unsigned fvfSize = _DynamicDX8VertexBuffer->FVF_Info().Get_FVF_Size();
+#ifdef RTS_RENDERER_DX8
 		// Lock with discard contents if the buffer offset is zero
-		DX8_ErrorCode(static_cast<DX8VertexBufferClass*>(DynamicVBAccess->VertexBuffer)->Get_DX8_Vertex_Buffer()->Lock(
-			DynamicVBAccess->VertexBufferOffset*_DynamicDX8VertexBuffer->FVF_Info().Get_FVF_Size(),
-			DynamicVBAccess->Get_Vertex_Count()*DynamicVBAccess->VertexBuffer->FVF_Info().Get_FVF_Size(),
+		DX8_ErrorCode(dxVB->Get_DX8_Vertex_Buffer()->Lock(
+			DynamicVBAccess->VertexBufferOffset*fvfSize,
+			DynamicVBAccess->Get_Vertex_Count()*fvfSize,
 			(unsigned char**)&Vertices,
 			D3DLOCK_NOSYSLOCK | (!DynamicVBAccess->VertexBufferOffset ? D3DLOCK_DISCARD : D3DLOCK_NOOVERWRITE)));
+		// Phase 5h.18 — bgfx-mode fallback: Lock's compat-shim leaves Vertices
+		// null; point at the CPU shadow buffer so Render2D et al. can write
+		// vertex data there instead. The shadow is flushed via the same path
+		// DX8 would have used for GPU memory.
+		if (Vertices == nullptr) {
+			if (auto* shadow = dxVB->Get_Cpu_Shadow())
+				Vertices = reinterpret_cast<VertexFormatXYZNDUV2*>(shadow + DynamicVBAccess->VertexBufferOffset * fvfSize);
+		}
+#else
+		if (auto* shadow = dxVB->Get_Cpu_Shadow())
+			Vertices = reinterpret_cast<VertexFormatXYZNDUV2*>(shadow + DynamicVBAccess->VertexBufferOffset * fvfSize);
+#endif
+		}
 		break;
 	case BUFFER_TYPE_DYNAMIC_SORTING:
 		Vertices=static_cast<SortingVertexBufferClass*>(DynamicVBAccess->VertexBuffer)->VertexBuffer;
@@ -935,7 +967,9 @@ DynamicVBAccessClass::WriteLockClass::~WriteLockClass()
 */
 #endif
 		DX8_Assert();
+#ifdef RTS_RENDERER_DX8
 		DX8_ErrorCode(static_cast<DX8VertexBufferClass*>(DynamicVBAccess->VertexBuffer)->Get_DX8_Vertex_Buffer()->Unlock());
+#endif
 		break;
 	case BUFFER_TYPE_DYNAMIC_SORTING:
 		break;

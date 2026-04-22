@@ -12,6 +12,20 @@ add_library(corei_bgfx STATIC
     ${CMAKE_SOURCE_DIR}/Core/GameEngineDevice/Include/BGFXDevice/Common/BgfxTextureCache.h
 )
 
+if(APPLE)
+    target_sources(corei_bgfx PRIVATE
+        Common/BgfxMacOSLayer.mm
+        ${CMAKE_SOURCE_DIR}/Core/GameEngineDevice/Include/BGFXDevice/Common/BgfxMacOSLayer.h
+    )
+    # Make sure Cocoa + QuartzCore are linked so the .mm's NSWindow /
+    # CAMetalLayer symbols resolve even though bgfx already pulls
+    # QuartzCore itself — the lint-free belt-and-braces.
+    target_link_libraries(corei_bgfx PUBLIC
+        "-framework Cocoa"
+        "-framework QuartzCore"
+    )
+endif()
+
 target_include_directories(corei_bgfx PUBLIC
     ${CMAKE_SOURCE_DIR}/Core/GameEngineDevice/Include
     ${CMAKE_SOURCE_DIR}/Core/Libraries/Source/WWVegas
@@ -27,6 +41,15 @@ target_link_libraries(corei_bgfx PUBLIC
     bimg_decode   # Phase 5j: DDS / KTX / PNG / TGA decoding via bimg::imageParse.
     corei_always_no_pch
 )
+
+# Phase 5i — BgfxBootstrap queries SDL_GetWindowSizeInPixels so it can pass
+# the real back-buffer pixel size to bgfx::init on Retina / fullscreen
+# macOS (logical dims leave a DPI-scaled gap at the edge of the drawable).
+# Only link SDL when the SDL platform backend is in play; the DX8-only
+# Windows build still uses the Win32 platform and has no SDL at all.
+if(RTS_PLATFORM_LOWER STREQUAL "sdl")
+    target_link_libraries(corei_bgfx PUBLIC SDL3::SDL3)
+endif()
 
 # Phase 5e — compile the smoke-triangle .sc shaders into C headers with the
 # shader bytecode embedded (one profile per platform target: glsl/essl/spirv

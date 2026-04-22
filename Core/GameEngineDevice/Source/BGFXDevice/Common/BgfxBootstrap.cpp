@@ -12,8 +12,9 @@
 #include "BGFXDevice/Common/BgfxBootstrap.h"
 #include "BGFXDevice/Common/BgfxBackend.h"
 #include "BGFXDevice/Common/BgfxTextureCache.h"
+#include "SDLDevice/Common/SDLGlobals.h"
 
-#include <cstdio>
+#include <cstdio>  // fprintf in Ensure_Init's hwnd-changed warning path.
 
 namespace BgfxBootstrap
 {
@@ -33,6 +34,25 @@ namespace
 
 bool Ensure_Init(void* hwnd, int width, int height, bool windowed)
 {
+	// Callers (DX8Wrapper) give us the LOGICAL game resolution (e.g. 800x600).
+	// On Retina / high-DPI displays, or whenever SDL_WINDOW_FULLSCREEN is
+	// used on macOS, the back-buffer pixel size can be much larger than
+	// that. bgfx uses the values we pass to bgfx::init/reset to size the
+	// Metal drawable and the default view rect — so if we hand it logical
+	// dims the drawable only covers a sub-rect of the native view, and the
+	// uncovered margin shows through as undefined pixels (the pink border
+	// symptom we chased in phase 5i). Query SDL for the real pixel size and
+	// hand that to bgfx; keep s_width/s_height as the pixel dims too, so
+	// the default viewport (Set_Viewport(0,0,0,0)) and any explicit
+	// viewport callers that ask for "full back-buffer" cover every pixel.
+	int bgfxW = width;
+	int bgfxH = height;
+	int pixW = 0, pixH = 0;
+	if (SDLDevice::getWindowPixelSize(pixW, pixH))
+	{
+		bgfxW = pixW;
+		bgfxH = pixH;
+	}
 	if (s_instance != nullptr)
 	{
 		// Already up. If the caller's geometry differs, reset in place so
@@ -44,14 +64,18 @@ bool Ensure_Init(void* hwnd, int width, int height, bool windowed)
 			                "recreating backend\n");
 			Shutdown();
 		}
-		else if (width != s_width || height != s_height || windowed != s_windowed)
+		else if (bgfxW != s_width || bgfxH != s_height || windowed != s_windowed)
 		{
-			s_instance->Reset(width, height, windowed);
-			s_width = width; s_height = height; s_windowed = windowed;
+			s_instance->Reset(bgfxW, bgfxH, windowed);
+			s_instance->Set_Logical_Resolution(width, height);
+			s_width = bgfxW; s_height = bgfxH; s_windowed = windowed;
 			return true;
 		}
 		else
 		{
+			// Pixel size may change without the logical resolution
+			// changing (monitor swap), so refresh the scale every call.
+			s_instance->Set_Logical_Resolution(width, height);
 			return true;
 		}
 	}
@@ -60,15 +84,16 @@ bool Ensure_Init(void* hwnd, int width, int height, bool windowed)
 	// RenderBackendRuntime::Set_Active(this) on success, so the runtime
 	// seam goes live as a side effect.
 	auto* backend = new BgfxBackend();
-	if (!backend->Init(hwnd, width, height, windowed))
+	if (!backend->Init(hwnd, bgfxW, bgfxH, windowed))
 	{
 		delete backend;
 		return false;
 	}
+	backend->Set_Logical_Resolution(width, height);
 	s_instance = backend;
 	s_hwnd     = hwnd;
-	s_width    = width;
-	s_height   = height;
+	s_width    = bgfxW;
+	s_height   = bgfxH;
 	s_windowed = windowed;
 	return true;
 }
@@ -96,5 +121,8 @@ bool Is_Initialized()
 {
 	return s_instance != nullptr;
 }
+
+int Get_Width()  { return s_width;  }
+int Get_Height() { return s_height; }
 
 } // namespace BgfxBootstrap

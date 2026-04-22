@@ -4492,6 +4492,7 @@ WW3DFormat	DX8Wrapper::getBackBufferFormat()
 #include "lightenvironment.h"
 #include "shader.h"
 #include "vertmaterial.h"
+#include "pointgr.h"
 #include "dx8vertexbuffer.h"
 #include "dx8indexbuffer.h"
 #include "dx8fvf.h"
@@ -4531,6 +4532,13 @@ bool DX8Wrapper::Init(void* hwnd, bool)
 {
 	s_pendingHwnd = hwnd;
 	IsInitted = true;
+	// The DX8 path runs Do_Onetime_Device_Dependent_Inits from Reset_Device
+	// (right after CreateDevice succeeds). In bgfx mode the real device isn't
+	// created until Set_Render_Device bootstraps BgfxBackend, but the subset
+	// of subsystems we actually need here (VertexMaterialClass::Presets,
+	// PointGroupClass tables) is GPU-free data — safe to prime now so the
+	// first Get_Preset() during game-client init finds non-null entries.
+	Do_Onetime_Device_Dependent_Inits();
 	return true;
 }
 
@@ -4543,11 +4551,58 @@ void DX8Wrapper::Shutdown()
 	s_pendingHwnd = nullptr;
 	IsInitted = false;
 }
-void DX8Wrapper::Do_Onetime_Device_Dependent_Inits() {}
-void DX8Wrapper::Do_Onetime_Device_Dependent_Shutdowns() {}
+void DX8Wrapper::Do_Onetime_Device_Dependent_Inits()
+{
+	// The DX8 branch runs a block of subsystem Init() calls here. Most of
+	// those (TheDX8MeshRenderer, SHD_INIT, BoxRenderObjClass,
+	// ShatterSystem, TextureLoader, PointGroupClass::_Init) poke DirectX
+	// state (VBs/IBs, shader constants, render targets) and are either
+	// stubbed out or would null-deref in bgfx mode. VertexMaterialClass::Init
+	// is the exception — pure data that populates Presets[] so that the
+	// first Get_Preset() call (e.g. W3DBridgeBuffer::allocateBridgeBuffers
+	// during terrain init) doesn't dereference a null Presets[type].
+	VertexMaterialClass::Init();
+	// MissingTexture::_Init is a no-op when the bgfx backend isn't live yet
+	// (this runs during DX8Wrapper::Init, before Set_Render_Device brings up
+	// the backend). The bgfx path currently relies on BgfxTextureCache's
+	// per-file fallback rather than a process-wide missing texture; the call
+	// is wired here so the hook is in place for a future re-call after the
+	// backend is up.
+	MissingTexture::_Init();
+	// Prime a permissive DX8Caps so gameplay subsystems (W3DRadar, water,
+	// shadows) that ask "does the hardware support format X?" get a yes
+	// without hitting the D3D path. The bgfx stub ctor fills in sensible
+	// defaults; real format rejection happens in BgfxBackend::Create_Texture.
+	if (CurrentCaps == nullptr) {
+		D3DADAPTER_IDENTIFIER8 adapter = {};
+		CurrentCaps = new DX8Caps(static_cast<IDirect3D8*>(nullptr),
+		                          static_cast<IDirect3DDevice8*>(nullptr),
+		                          WW3D_FORMAT_A8R8G8B8, adapter);
+	}
+}
+void DX8Wrapper::Do_Onetime_Device_Dependent_Shutdowns()
+{
+	MissingTexture::_Deinit();
+	VertexMaterialClass::Shutdown();
+	delete CurrentCaps;
+	CurrentCaps = nullptr;
+}
 
 bool DX8Wrapper::Has_Stencil() { return false; }
 void DX8Wrapper::Get_Format_Name(unsigned int, StringClass*) {}
+
+void DX8Wrapper::Set_World_Identity()
+{
+	if (render_state_changed & (unsigned)WORLD_IDENTITY) return;
+	render_state.world.Make_Identity();
+	render_state_changed |= (unsigned)WORLD_CHANGED | (unsigned)WORLD_IDENTITY;
+}
+void DX8Wrapper::Set_View_Identity()
+{
+	if (render_state_changed & (unsigned)VIEW_IDENTITY) return;
+	render_state.view.Make_Identity();
+	render_state_changed |= (unsigned)VIEW_CHANGED | (unsigned)VIEW_IDENTITY;
+}
 
 void DX8Wrapper::Begin_Scene()
 {
@@ -4752,6 +4807,28 @@ void DX8Wrapper::Apply_Render_State_Changes()
 		}
 		b->Set_Material(desc);
 		render_state_changed &= ~MATERIAL_CHANGED;
+	}
+
+	// Phase 5i — forward texture stage bindings. TEXTUREn_CHANGED bits are
+	// set by the inline DX8Wrapper::Set_Texture in dx8wrapper.h;
+	// TextureClass::Apply(stage) in bgfx mode routes the backend handle
+	// through IRenderBackend::Set_Texture. Without this loop, the bgfx
+	// backend's m_stageTexture stays 0 and every textured draw falls back
+	// to the 2x2 white placeholder.
+	unsigned texMask = TEXTURE0_CHANGED;
+	const int maxStages = CurrentCaps
+		? CurrentCaps->Get_Max_Textures_Per_Pass()
+		: 2;
+	for (int i = 0; i < maxStages; ++i, texMask <<= 1)
+	{
+		if (render_state_changed & texMask)
+		{
+			if (render_state.Textures[i])
+				render_state.Textures[i]->Apply(i);
+			else
+				TextureBaseClass::Apply_Null(i);
+			render_state_changed &= ~texMask;
+		}
 	}
 }
 void DX8Wrapper::Apply_Default_State()
@@ -5100,8 +5177,10 @@ namespace
 		if (texN >= 3) off += sizeof(float) * 2;   // UV2 unused by the uber-shader
 		if (texN >= 4) off += sizeof(float) * 2;   // UV3
 
-		// Sanity: computed offset should match the reported stride.
-		return (off == stride);
+		// Sanity: computed offset should match the reported stride. Some FVFs
+		// round up (e.g. 4-byte padding for 16-byte alignment) — accept off<=stride
+		// and let bgfx use the larger stride so we skip past padding.
+		return (off <= stride);
 	}
 }
 
@@ -5199,7 +5278,16 @@ IDirect3DVolumeTexture8* DX8Wrapper::_Create_DX8_Volume_Texture(unsigned int, un
 IDirect3DSurface8* DX8Wrapper::_Create_DX8_Surface(unsigned int, unsigned int, WW3DFormat) { return nullptr; }
 IDirect3DSurface8* DX8Wrapper::_Create_DX8_Surface(const char*) { return nullptr; }
 IDirect3DSurface8* DX8Wrapper::_Get_DX8_Front_Buffer() { return nullptr; }
-SurfaceClass* DX8Wrapper::_Get_DX8_Back_Buffer(unsigned int) { return nullptr; }
+SurfaceClass* DX8Wrapper::_Get_DX8_Back_Buffer(unsigned int)
+{
+	// Build a CPU-backed SurfaceClass sized to the live bgfx back-buffer so
+	// callers (e.g. W3DSmudgeManager::ReAcquireResources) can query
+	// width/height. Fallback to a conservative default if the bootstrap
+	// hasn't recorded real dimensions yet.
+	const int w = BgfxBootstrap::Get_Width()  > 0 ? BgfxBootstrap::Get_Width()  : 1024;
+	const int h = BgfxBootstrap::Get_Height() > 0 ? BgfxBootstrap::Get_Height() : 768;
+	return NEW_REF(SurfaceClass, (static_cast<unsigned>(w), static_cast<unsigned>(h), WW3D_FORMAT_A8R8G8B8));
+}
 
 void DX8Wrapper::_Update_Texture(TextureClass*, TextureClass*) {}
 void DX8Wrapper::Flush_DX8_Resource_Manager(unsigned int) {}

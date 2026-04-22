@@ -16,6 +16,7 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -41,7 +42,7 @@ namespace
 		return s_map;
 	}
 
-	bool Read_File(const char* path, std::vector<uint8_t>& out)
+	bool Read_Via_Stdio(const char* path, std::vector<uint8_t>& out)
 	{
 		FILE* f = std::fopen(path, "rb");
 		if (!f) return false;
@@ -53,6 +54,17 @@ namespace
 		const std::size_t read = std::fread(out.data(), 1, out.size(), f);
 		std::fclose(f);
 		return read == out.size();
+	}
+
+	// Pluggable file reader. The game engine registers one that routes
+	// through TheFileSystem (so BIG archives + localized paths work), and
+	// falls back to stdio for absolute/dev paths. Standalone BGFX smoke
+	// tests don't register anything and get the stdio-only default.
+	BgfxTextureCache::FileReaderFn s_reader = &Read_Via_Stdio;
+
+	bool Read_File(const char* path, std::vector<uint8_t>& out)
+	{
+		return s_reader ? s_reader(path, out) : Read_Via_Stdio(path, out);
 	}
 }
 
@@ -137,6 +149,11 @@ unsigned Ref_Count(const char* path)
 	auto& map = Entries();
 	auto it = map.find(path);
 	return (it == map.end()) ? 0u : it->second.refCount;
+}
+
+void Set_File_Reader(FileReaderFn fn)
+{
+	s_reader = fn ? fn : &Read_Via_Stdio;
 }
 
 } // namespace BgfxTextureCache

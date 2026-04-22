@@ -12,6 +12,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <vector>
 
 // BgfxTextureCache
 // ================
@@ -42,6 +43,12 @@
 
 namespace BgfxTextureCache
 {
+	// File reader plugged in by the game engine (routes through
+	// TheFileSystem so BIG archives work). Default reader uses stdio, which
+	// is fine for standalone smoke tests but can't see .big content.
+	using FileReaderFn = bool(*)(const char* path, std::vector<uint8_t>& out);
+	void Set_File_Reader(FileReaderFn fn);
+
 	// Loads `path` from disk if not already cached, decodes via bimg,
 	// uploads through the active IRenderBackend. Returns 0 if no backend
 	// is active, the file can't be opened, or bimg can't decode it.

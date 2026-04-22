@@ -11,6 +11,13 @@
 #                   (Must contain *.big files and/or a Data/ subfolder.)
 #                   Optional after the first run: if Contents/Resources/
 #                   already holds staged assets, staging is skipped.
+#   --generals-assets DIR
+#                   Path to a vanilla Generals install (folder with INI.big).
+#                   Zero Hour needs vanilla Generals' base data at runtime
+#                   to resolve Data\\INI\\Default\\GameData.ini and friends.
+#                   If --assets points at .../Install/ZeroHour, the sibling
+#                   .../Install/Generals is auto-detected when this flag is
+#                   omitted. Ignored for --target generals.
 #   --restage       Force re-staging even if assets look already present.
 #   --target  NAME  Which build to run: "zh" (Zero Hour, default) or
 #                   "generals" (vanilla Generals).
@@ -22,7 +29,8 @@
 #   -h | --help     Show this help.
 #
 # Environment overrides:
-#   ASSETS_DIR, TARGET, MODE, BUILD_DIR — same as the flags above.
+#   ASSETS_DIR, GENERALS_ASSETS_DIR, TARGET, MODE, BUILD_DIR
+#   — same as the flags above.
 
 set -euo pipefail
 
@@ -30,23 +38,25 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 
 ASSETS_DIR="${ASSETS_DIR:-}"
+GENERALS_ASSETS_DIR="${GENERALS_ASSETS_DIR:-}"
 TARGET="${TARGET:-zh}"
 MODE="${MODE:-symlink}"
 BUILD_DIR="${BUILD_DIR:-build_bgfx}"
 RUN_AFTER_STAGE=1
 FORCE_RESTAGE=0
 
-usage() { sed -n '2,24p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,31p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
 
 while (($#)); do
     case "$1" in
-        --assets)   ASSETS_DIR="$2"; shift 2 ;;
-        --target)   TARGET="$2";     shift 2 ;;
-        --mode)     MODE="$2";       shift 2 ;;
-        --build)    BUILD_DIR="$2";  shift 2 ;;
-        --no-run)   RUN_AFTER_STAGE=0; shift ;;
-        --restage)  FORCE_RESTAGE=1; shift ;;
-        -h|--help)  usage; exit 0 ;;
+        --assets)            ASSETS_DIR="$2";          shift 2 ;;
+        --generals-assets)   GENERALS_ASSETS_DIR="$2"; shift 2 ;;
+        --target)            TARGET="$2";              shift 2 ;;
+        --mode)              MODE="$2";                shift 2 ;;
+        --build)             BUILD_DIR="$2";           shift 2 ;;
+        --no-run)            RUN_AFTER_STAGE=0;        shift ;;
+        --restage)           FORCE_RESTAGE=1;          shift ;;
+        -h|--help)           usage; exit 0 ;;
         *)
             if [[ -z "${ASSETS_DIR}" && -d "$1" ]]; then
                 ASSETS_DIR="$1"; shift
@@ -58,6 +68,10 @@ done
 
 if [[ -n "${ASSETS_DIR}" && ! -d "${ASSETS_DIR}" ]]; then
     echo "Error: assets directory does not exist: ${ASSETS_DIR}" >&2
+    exit 2
+fi
+if [[ -n "${GENERALS_ASSETS_DIR}" && ! -d "${GENERALS_ASSETS_DIR}" ]]; then
+    echo "Error: --generals-assets dir does not exist: ${GENERALS_ASSETS_DIR}" >&2
     exit 2
 fi
 
@@ -200,6 +214,73 @@ if (( NEED_STAGE )); then
         STAGED=$((STAGED + 1))
     done
     echo "Staged ${STAGED} top-level entries."
+fi
+
+upsert_registry_install_path() {
+    # Seeds ~/Library/Application Support/EA/Generals/RegistrySettings.ini with
+    # an "InstallPath=<abs>" entry. The ZH engine reads this via
+    # GetStringFromGeneralsRegistry("", "InstallPath", …) and uses it to load
+    # vanilla Generals BIG files (INI.big holds Data\INI\Default\GameData.ini
+    # and other base-game INIs that ZH extends).
+    local abs_path="$1"
+    local reg_dir="$HOME/Library/Application Support/EA/Generals"
+    local reg_file="${reg_dir}/RegistrySettings.ini"
+    mkdir -p "${reg_dir}"
+
+    local tmp="${reg_file}.tmp.$$"
+    if [[ -f "${reg_file}" ]]; then
+        grep -v -E '^[[:space:]]*InstallPath[[:space:]]*=' -- "${reg_file}" > "${tmp}" || true
+    else
+        : > "${tmp}"
+    fi
+    printf 'InstallPath=%s\n' "${abs_path}" >> "${tmp}"
+    mv -f "${tmp}" "${reg_file}"
+    echo "  wrote  : ${reg_file}"
+    echo "         : InstallPath=${abs_path}"
+}
+
+resolve_generals_install() {
+    # Only ZH needs this. Returns the chosen dir on stdout, empty string if
+    # none found. Order: explicit --generals-assets, auto-sibling of the ZH
+    # assets dir, then user's install tree under ./Install/Generals.
+    if [[ "${TARGET}" != "zh" && "${TARGET}" != "ZH" && "${TARGET}" != "zerohour" ]]; then
+        return 0
+    fi
+
+    if [[ -n "${GENERALS_ASSETS_DIR}" ]]; then
+        if ! case_insensitive_find "INI.big" "${GENERALS_ASSETS_DIR}" >/dev/null; then
+            echo "Error: --generals-assets dir does not contain INI.big: ${GENERALS_ASSETS_DIR}" >&2
+            exit 2
+        fi
+        printf '%s\n' "${GENERALS_ASSETS_DIR}"
+        return 0
+    fi
+
+    if [[ -n "${ASSETS_DIR}" ]]; then
+        local parent sibling
+        parent="$(cd -- "${ASSETS_DIR}/.." && pwd 2>/dev/null || true)"
+        sibling="${parent}/Generals"
+        if [[ -d "${sibling}" ]] && case_insensitive_find "INI.big" "${sibling}" >/dev/null; then
+            printf '%s\n' "${sibling}"
+            return 0
+        fi
+    fi
+
+    return 0
+}
+
+# Zero Hour needs vanilla Generals data staged or pointed-to via the registry
+# store. Do this after staging so we can even fall back to a sibling path.
+GEN_INSTALL="$(resolve_generals_install)"
+if [[ -n "${GEN_INSTALL}" ]]; then
+    GEN_INSTALL_ABS="$(cd -- "${GEN_INSTALL}" && pwd)"
+    echo "Vanilla Generals data"
+    echo "  source : ${GEN_INSTALL_ABS}"
+    upsert_registry_install_path "${GEN_INSTALL_ABS}"
+elif [[ "${TARGET}" == "zh" || "${TARGET}" == "ZH" || "${TARGET}" == "zerohour" ]]; then
+    echo "Warning: no vanilla Generals install located. ZH init will throw" >&2
+    echo "         'Uncaught Exception' while loading Data\\INI\\Default\\GameData.ini." >&2
+    echo "         Pass --generals-assets DIR (folder containing INI.big) to fix." >&2
 fi
 
 if (( ! RUN_AFTER_STAGE )); then

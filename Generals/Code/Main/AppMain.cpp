@@ -138,6 +138,13 @@ int main(int argc, char *argv[])
 			Uint32 flags = SDL_WINDOW_HIDDEN;
 			if (!windowed)
 				flags |= SDL_WINDOW_FULLSCREEN;
+			// macOS Retina: without this flag SDL configures the NSView for
+			// point-sized backing, which leaves the bgfx drawable at half the
+			// real pixel count and collapses the render into the top-left
+			// quadrant of the display. With the flag, SDL_GetWindowSizeInPixels
+			// returns the true physical pixel count and bgfx fills the entire
+			// surface.
+			flags |= SDL_WINDOW_HIGH_PIXEL_DENSITY;
 
 			SDLDevice::TheSDLWindow = SDL_CreateWindow(
 				"Command and Conquer Generals",

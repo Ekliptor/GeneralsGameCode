@@ -48,6 +48,10 @@ void OpenALAudioManager::init()
 {
 	AudioManager::init();
 	enumerateProviders();
+	// Mirrors MilesAudioManager::init(): open the backend device here so that
+	// TheAudio is ready to accept sources/buffers before any subsystem (e.g.
+	// the video player's primeVideoAudio) asks for a stream handle.
+	openDevice();
 }
 
 void OpenALAudioManager::postProcessLoad()

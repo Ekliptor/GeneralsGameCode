@@ -181,6 +181,7 @@ IndexBufferClass::WriteLockClass::WriteLockClass(IndexBufferClass* index_buffer_
 		DX8_Assert();
 		{
 		auto* dxIB = static_cast<DX8IndexBufferClass*>(index_buffer);
+#ifdef RTS_RENDERER_DX8
 		DX8_ErrorCode(dxIB->Get_DX8_Index_Buffer()->Lock(
 			0,
 			index_buffer->Get_Index_Count()*sizeof(WORD),
@@ -188,6 +189,12 @@ IndexBufferClass::WriteLockClass::WriteLockClass(IndexBufferClass* index_buffer_
 			flags));
 		// Phase 5h.18 — shadow fallback.
 		if (indices == nullptr) indices = dxIB->Get_Cpu_Shadow();
+#else
+		(void)flags;
+		// bgfx mode: there is no GPU IB to Lock — writes land in the CPU
+		// shadow and the renderer sources from it via Draw_Triangles_Dynamic.
+		indices = dxIB->Get_Cpu_Shadow();
+#endif
 		}
 		break;
 	case BUFFER_TYPE_SORTING:
@@ -210,7 +217,9 @@ IndexBufferClass::WriteLockClass::~WriteLockClass()
 	switch (index_buffer->Type()) {
 	case BUFFER_TYPE_DX8:
 		DX8_Assert();
+#ifdef RTS_RENDERER_DX8
 		DX8_ErrorCode(static_cast<DX8IndexBufferClass*>(index_buffer)->index_buffer->Unlock());
+#endif
 		break;
 	case BUFFER_TYPE_SORTING:
 		break;
@@ -237,6 +246,7 @@ IndexBufferClass::AppendLockClass::AppendLockClass(IndexBufferClass* index_buffe
 		DX8_Assert();
 		{
 		auto* dxIB = static_cast<DX8IndexBufferClass*>(index_buffer);
+#ifdef RTS_RENDERER_DX8
 		DX8_ErrorCode(dxIB->index_buffer->Lock(
 			start_index*sizeof(unsigned short),
 			index_range*sizeof(unsigned short),
@@ -247,6 +257,11 @@ IndexBufferClass::AppendLockClass::AppendLockClass(IndexBufferClass* index_buffe
 			if (auto* shadow = dxIB->Get_Cpu_Shadow())
 				indices = shadow + start_index;
 		}
+#else
+		(void)index_range;
+		if (auto* shadow = dxIB->Get_Cpu_Shadow())
+			indices = shadow + start_index;
+#endif
 		}
 		break;
 	case BUFFER_TYPE_SORTING:
@@ -266,7 +281,9 @@ IndexBufferClass::AppendLockClass::~AppendLockClass()
 	switch (index_buffer->Type()) {
 	case BUFFER_TYPE_DX8:
 		DX8_Assert();
+#ifdef RTS_RENDERER_DX8
 		DX8_ErrorCode(static_cast<DX8IndexBufferClass*>(index_buffer)->index_buffer->Unlock());
+#endif
 		break;
 	case BUFFER_TYPE_SORTING:
 		break;
@@ -331,6 +348,7 @@ DX8IndexBufferClass::DX8IndexBufferClass(unsigned short index_count_,UsageType u
 {
 	DX8_THREAD_ASSERT();
 	WWASSERT(index_count);
+#ifdef RTS_RENDERER_DX8
 	unsigned usage_flags=
 		D3DUSAGE_WRITEONLY|
 		((usage&USAGE_DYNAMIC) ? D3DUSAGE_DYNAMIC : 0)|
@@ -360,10 +378,8 @@ DX8IndexBufferClass::DX8IndexBufferClass(unsigned short index_count_,UsageType u
 	// only the mesh-cache call stays guarded.
 	TextureClass::Invalidate_Old_Unused_Textures(5000);
 
-#ifdef RTS_RENDERER_DX8
 	// Invalidate the mesh cache
 	WW3D::_Invalidate_Mesh_Cache();
-#endif
 
 	// Try again...
 	ret=DX8Wrapper::_Get_D3D_Device8()->CreateIndexBuffer(
@@ -379,6 +395,14 @@ DX8IndexBufferClass::DX8IndexBufferClass(unsigned short index_count_,UsageType u
 
 	// If it still fails it is fatal
 	DX8_ErrorCode(ret);
+#else
+	(void)usage;
+	// bgfx mode: no real GPU index buffer — Lock/Unlock drives the CPU shadow
+	// and Draw_Triangles_Dynamic sources from it. index_buffer stays null; the
+	// WriteLockClass' `if (indices == nullptr) indices = dxIB->Get_Cpu_Shadow()`
+	// branch at dx8indexbuffer.cpp:190 is the bgfx entry point.
+	index_buffer = nullptr;
+#endif
 
 	// Phase 5h.18 — CPU shadow for bgfx-mode Lock fallback / Draw_Triangles
 	// extraction. Dead memory in DX8 mode.
@@ -389,7 +413,7 @@ DX8IndexBufferClass::DX8IndexBufferClass(unsigned short index_count_,UsageType u
 
 DX8IndexBufferClass::~DX8IndexBufferClass()
 {
-	index_buffer->Release();
+	if (index_buffer) index_buffer->Release();
 	// Phase 5h.18
 	delete[] m_cpuShadow;
 	m_cpuShadow = nullptr;
@@ -470,12 +494,25 @@ DynamicIBAccessClass::WriteLockClass::WriteLockClass(DynamicIBAccessClass* ib_ac
 		WWASSERT(DynamicIBAccess);
 //		WWASSERT(!dynamic_dx8_index_buffer->Engine_Refs());
 		DX8_Assert();
-		DX8_ErrorCode(
-			static_cast<DX8IndexBufferClass*>(DynamicIBAccess->IndexBuffer)->Get_DX8_Index_Buffer()->Lock(
+		{
+		auto* dxIB = static_cast<DX8IndexBufferClass*>(DynamicIBAccess->IndexBuffer);
+#ifdef RTS_RENDERER_DX8
+		DX8_ErrorCode(dxIB->Get_DX8_Index_Buffer()->Lock(
 			DynamicIBAccess->IndexBufferOffset*sizeof(WORD),
 			DynamicIBAccess->Get_Index_Count()*sizeof(WORD),
 			(unsigned char**)&Indices,
 			!DynamicIBAccess->IndexBufferOffset ? D3DLOCK_DISCARD : D3DLOCK_NOOVERWRITE));
+		// Phase 5h.18 — fall back to the CPU shadow when Lock leaves Indices
+		// null (bgfx compat shim).
+		if (Indices == nullptr) {
+			if (auto* shadow = dxIB->Get_Cpu_Shadow())
+				Indices = shadow + DynamicIBAccess->IndexBufferOffset;
+		}
+#else
+		if (auto* shadow = dxIB->Get_Cpu_Shadow())
+			Indices = shadow + DynamicIBAccess->IndexBufferOffset;
+#endif
+		}
 		break;
 	case BUFFER_TYPE_DYNAMIC_SORTING:
 		Indices=static_cast<SortingIndexBufferClass*>(DynamicIBAccess->IndexBuffer)->index_buffer;
@@ -493,7 +530,9 @@ DynamicIBAccessClass::WriteLockClass::~WriteLockClass()
 	switch (DynamicIBAccess->Get_Type()) {
 	case BUFFER_TYPE_DYNAMIC_DX8:
 		DX8_Assert();
+#ifdef RTS_RENDERER_DX8
 		DX8_ErrorCode(static_cast<DX8IndexBufferClass*>(DynamicIBAccess->IndexBuffer)->Get_DX8_Index_Buffer()->Unlock());
+#endif
 		break;
 	case BUFFER_TYPE_DYNAMIC_SORTING:
 		break;

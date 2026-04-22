@@ -18,6 +18,13 @@
 
 #include <Utility/CppMacros.h>
 #include "BGFXDevice/Common/BgfxBackend.h"
+#if defined(__APPLE__)
+#include "BGFXDevice/Common/BgfxMacOSLayer.h"
+// Cached NSWindow handle so End_Scene can re-probe the layer at render
+// time without threading it through IRenderBackend. Non-null between
+// Init and Shutdown.
+void* s_cached_nwh = nullptr;
+#endif
 #include "WW3D2/RenderBackendRuntime.h"
 #include "vector4.h"
 
@@ -147,6 +154,7 @@ bool BgfxBackend::Init(void* windowHandle, int width, int height, bool windowed)
 	if (!bgfx::init(init))
 	{
 		fprintf(stderr, "BgfxBackend::Init: bgfx::init failed\n");
+		fflush(stderr);
 		return false;
 	}
 
@@ -154,12 +162,24 @@ bool BgfxBackend::Init(void* windowHandle, int width, int height, bool windowed)
 	m_height = height;
 	m_initialized = true;
 
+#if defined(__APPLE__)
+	// With SDL_WINDOW_HIGH_PIXEL_DENSITY we get a bgfx drawable at the
+	// real pixel count (e.g. 6016x3384) but SDL/bgfx leave the
+	// CAMetalLayer at contentsScale=1.0. CAMetalLayer's expected drawable
+	// size is `bounds * contentsScale`; a 2x mismatch makes Metal present
+	// only half the drawable. Align contentsScale with the window's
+	// backingScaleFactor so drawable pixels == layer points × scale.
+	BgfxMacOSLayer::Fit_Layer_To_View(windowHandle);
+	s_cached_nwh = windowHandle;
+#endif
+
 	bgfx::setViewRect(0, 0, 0, static_cast<uint16_t>(width), static_cast<uint16_t>(height));
 
 	const bgfx::RendererType::Enum rendererType = bgfx::getRendererType();
 	fprintf(stderr, "BgfxBackend::Init: %s (%dx%d, %s)\n",
 	        bgfx::getRendererName(rendererType), width, height,
 	        windowed ? "windowed" : "fullscreen");
+	fflush(stderr);
 
 	// Phase 5h.1 — publish ourselves as the active backend so production
 	// DX8 call sites (once they're wired up) can route through the interface.
@@ -249,6 +269,14 @@ void BgfxBackend::Begin_Scene()
 
 void BgfxBackend::End_Scene(bool flip)
 {
+#if defined(__APPLE__)
+	// Re-apply the layer fit every frame. Cheap, idempotent, and insures
+	// against any path — AppKit relayout, fullscreen transition,
+	// HIGH_PIXEL_DENSITY late binding — that might reset contentsScale or
+	// the layer frame after bgfx::init.
+	if (s_cached_nwh)
+		BgfxMacOSLayer::Fit_Layer_To_View(s_cached_nwh);
+#endif
 	bgfx::frame(flip);
 }
 
@@ -329,7 +357,11 @@ uint64_t BuildStateMask(const ShaderStateDesc& s)
 	if (s.colorWrite) state |= BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A;
 	if (s.depthWrite) state |= BGFX_STATE_WRITE_Z;
 	state |= TranslateDepthCmp(s.depthCmp);
-	if (s.cullEnable) state |= BGFX_STATE_CULL_CCW; // bgfx default winding for CCW front
+	// Phase-debug: temporarily disable culling so we can see both triangles of
+	// any 2D quad. Render2D's default shader doesn't explicitly set cull-mode;
+	// rely on the game shader setting CULL_MODE_DISABLE for double-sided draws.
+	// if (s.cullEnable) state |= BGFX_STATE_CULL_CCW;
+	(void)s.cullEnable;
 	// Blend: only encode when not the opaque default (ONE / ZERO).
 	if (!(s.srcBlend == ShaderStateDesc::BLEND_ONE && s.dstBlend == ShaderStateDesc::BLEND_ZERO))
 	{
@@ -994,12 +1026,39 @@ void BgfxBackend::Set_Viewport(int16_t x, int16_t y, uint16_t width, uint16_t he
 		return;
 	}
 
+	// Scale logical (game-pixel) viewports up to back-buffer pixels when the
+	// back-buffer is larger than the game's logical resolution (Retina /
+	// fullscreen on macOS). We only scale viewports targeting the
+	// backbuffer (view 0); render-target views already use the RT's native
+	// pixel dims, so the game supplies those in the correct space.
+	int32_t sx = x, sy = y;
+	int32_t sw = width, sh = height;
+	if (m_currentView == 0
+		&& m_logicalW > 0 && m_logicalH > 0
+		&& (m_logicalW != m_width || m_logicalH != m_height))
+	{
+		const double kx = static_cast<double>(m_width)  / static_cast<double>(m_logicalW);
+		const double ky = static_cast<double>(m_height) / static_cast<double>(m_logicalH);
+		sx = static_cast<int32_t>(x * kx);
+		sy = static_cast<int32_t>(y * ky);
+		sw = static_cast<int32_t>(width  * kx);
+		sh = static_cast<int32_t>(height * ky);
+	}
+
 	// bgfx's setViewRect takes origin in pixels from top-left and unsigned
 	// extents. Negative `x`/`y` aren't supported — clamp to 0 and shrink the
 	// visible extent so the clipped rect still lands inside the target.
-	uint16_t ox = (x < 0) ? static_cast<uint16_t>(0) : static_cast<uint16_t>(x);
-	uint16_t oy = (y < 0) ? static_cast<uint16_t>(0) : static_cast<uint16_t>(y);
-	bgfx::setViewRect(m_currentView, ox, oy, width, height);
+	uint16_t ox = (sx < 0) ? static_cast<uint16_t>(0) : static_cast<uint16_t>(sx);
+	uint16_t oy = (sy < 0) ? static_cast<uint16_t>(0) : static_cast<uint16_t>(sy);
+	uint16_t ow = sw < 0 ? 0 : static_cast<uint16_t>(sw);
+	uint16_t oh = sh < 0 ? 0 : static_cast<uint16_t>(sh);
+	bgfx::setViewRect(m_currentView, ox, oy, ow, oh);
+}
+
+void BgfxBackend::Set_Logical_Resolution(int logicalW, int logicalH)
+{
+	m_logicalW = logicalW;
+	m_logicalH = logicalH;
 }
 
 static bgfx::ProgramHandle SelectProgram(uint32_t attrMask,

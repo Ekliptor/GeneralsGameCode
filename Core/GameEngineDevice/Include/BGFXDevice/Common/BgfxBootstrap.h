@@ -48,4 +48,11 @@ namespace BgfxBootstrap
 	// True when a live backend is present (i.e. between Ensure_Init and
 	// Shutdown). Mostly useful for debug / assertion code.
 	bool Is_Initialized();
+
+	// Current back-buffer dimensions as configured by the most recent
+	// Ensure_Init / Reset. Zero when no backend is live. Exposed so
+	// DX8Wrapper's bgfx-mode shims (back-buffer surface, clipping rects)
+	// can read the real resolution instead of assuming a fixed default.
+	int  Get_Width();
+	int  Get_Height();
 }

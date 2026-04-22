@@ -37,4 +37,13 @@ namespace SDLDevice
 	// Windows: HWND.  macOS: NSWindow*.  Linux: X11 Window (cast to void*).
 	// Used by DX8 init (HWND), bgfx platform data, cursor-clip, and title bar.
 	void *getNativeWindowHandle();
+
+	// Fill `w`/`h` with the window's back-buffer pixel size — on Retina /
+	// high-DPI displays this is larger than the logical window size we
+	// requested in SDL_CreateWindow. Returns false when no window exists
+	// or SDL fails (in which case w/h are untouched). Callers that drive
+	// the GPU back-buffer (bgfx::init / bgfx::reset) need these pixel
+	// dims so the swap-chain drawable matches the native view and the
+	// viewport covers the full framebuffer.
+	bool getWindowPixelSize(int &w, int &h);
 }

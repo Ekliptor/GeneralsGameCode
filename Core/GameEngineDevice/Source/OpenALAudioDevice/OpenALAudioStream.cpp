@@ -56,6 +56,17 @@ void OpenALAudioStream::bufferData(const UnsignedByte* data, Int sizeInBytes, AL
 	alBufferData(buf, format, data, sizeInBytes, sampleRateHz);
 	alSourceQueueBuffers(m_source, 1, &buf);
 	++m_queuedCount;
+
+	// Self-heal: on Apple's OpenAL, buffers queued to a source in AL_STOPPED or
+	// AL_INITIAL are instantly marked "processed" and never actually play until
+	// alSourcePlay is called. That happens naturally on first buffer (INITIAL)
+	// and on any underrun (STOPPED), so just kick the source whenever we add a
+	// buffer while it isn't already playing. No-op if caller explicitly paused.
+	ALint state = 0;
+	alGetSourcei(m_source, AL_SOURCE_STATE, &state);
+	if (state != AL_PLAYING && state != AL_PAUSED) {
+		alSourcePlay(m_source);
+	}
 }
 
 void OpenALAudioStream::play()

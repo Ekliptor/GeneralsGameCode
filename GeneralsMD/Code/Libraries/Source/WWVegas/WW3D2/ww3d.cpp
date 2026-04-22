@@ -2185,17 +2185,71 @@ long WW3D::UserStat2 = 0;
 ShaderClass WW3D::DefaultDebugShader;
 ShaderClass WW3D::LightmapDebugShader;
 
-WW3DErrorType WW3D::Init(void* /*hwnd*/, char* /*defaultpal*/, bool /*lite*/) { IsInitted = true; return WW3D_ERROR_OK; }
+WW3DErrorType WW3D::Init(void* hwnd, char* /*defaultpal*/, bool lite)
+{
+	// Mirror what the DX8 path does: hand the hwnd to DX8Wrapper::Init so
+	// the bgfx branch's one-time subsystem primers (VertexMaterialClass
+	// presets, PointGroupClass tables) run before GameClient::init touches
+	// W3DBridgeBuffer / HeightMap. Without this, Get_Preset() dereferences
+	// a null Presets[] entry during terrain bring-up.
+	if (!DX8Wrapper::Init(hwnd, lite))
+		return WW3D_ERROR_INITIALIZATION_FAILED;
+	IsInitted = true;
+	return WW3D_ERROR_OK;
+}
 WW3DErrorType WW3D::Shutdown() { IsInitted = false; return WW3D_ERROR_OK; }
-WW3DErrorType WW3D::Begin_Render(bool, bool, const Vector3&, float, void(*)()) { IsRendering = true; return WW3D_ERROR_OK; }
-WW3DErrorType WW3D::End_Render(bool) { IsRendering = false; return WW3D_ERROR_OK; }
+WW3DErrorType WW3D::Begin_Render(bool clear, bool clearz, const Vector3& color, float dest_alpha, void(*)())
+{
+	if (!IsInitted) return WW3D_ERROR_OK;
+	IsRendering = true;
+	// Per-frame lifecycle: set a full-screen viewport, clear if requested,
+	// then enter the scene. DX8Wrapper's bgfx branch (dx8wrapper.cpp:4594 /
+	// 4609 / 4619) routes each call through RenderBackendRuntime → bgfx. If
+	// this path is skipped, bgfx never gets a `frame()` and the window
+	// stays on whatever the compositor last painted — which is what was
+	// happening before.
+	if (clear || clearz) {
+		int w = 0, h = 0, bits = 0; bool windowed = true;
+		DX8Wrapper::Get_Device_Resolution(w, h, bits, windowed);
+		D3DVIEWPORT8 vp = {};
+		vp.Width  = static_cast<DWORD>(w);
+		vp.Height = static_cast<DWORD>(h);
+		vp.MaxZ   = 1.0f;
+		DX8Wrapper::Set_Viewport(&vp);
+		DX8Wrapper::Clear(clear, clearz, color, dest_alpha);
+	}
+	DX8Wrapper::Begin_Scene();
+	return WW3D_ERROR_OK;
+}
+WW3DErrorType WW3D::End_Render(bool flip_frame)
+{
+	if (!IsInitted) return WW3D_ERROR_OK;
+	IsRendering = false;
+	DX8Wrapper::End_Scene(flip_frame);
+	++FrameCount;
+	return WW3D_ERROR_OK;
+}
 void WW3D::Flush(RenderInfoClass&) {}
 WW3DErrorType WW3D::Render(SceneClass*, CameraClass*, bool, bool, const Vector3&) { return WW3D_ERROR_OK; }
 WW3DErrorType WW3D::Render(RenderObjClass&, RenderInfoClass&) { return WW3D_ERROR_OK; }
 void WW3D::Sync(bool) {}
 void WW3D::Update_Logic_Frame_Time(float ms) { LogicFrameTimeMs = ms; }
-WW3DErrorType WW3D::Set_Device_Resolution(int, int, int, int, bool) { return WW3D_ERROR_OK; }
-WW3DErrorType WW3D::Set_Render_Device(int, int, int, int, int, bool, bool, bool) { return WW3D_ERROR_OK; }
+WW3DErrorType WW3D::Set_Device_Resolution(int width, int height, int bits, int windowed, bool resize_window)
+{
+	// Forward to the DX8Wrapper bgfx branch, which calls
+	// BgfxBootstrap::Ensure_Init → BgfxBackend::Init. Without this the
+	// game's "device configured" path returns OK silently and bgfx is
+	// never brought up, leaving the window black.
+	return DX8Wrapper::Set_Device_Resolution(width, height, bits, windowed, resize_window)
+		? WW3D_ERROR_OK
+		: WW3D_ERROR_INITIALIZATION_FAILED;
+}
+WW3DErrorType WW3D::Set_Render_Device(int dev, int width, int height, int bits, int windowed, bool resize_window, bool reset_device, bool restore_assets)
+{
+	return DX8Wrapper::Set_Render_Device(dev, width, height, bits, windowed, resize_window, reset_device, restore_assets)
+		? WW3D_ERROR_OK
+		: WW3D_ERROR_INITIALIZATION_FAILED;
+}
 void WW3D::Get_Device_Resolution(int& w, int& h, int& bits, bool& windowed) { w = h = bits = 0; windowed = true; }
 void WW3D::Get_Render_Target_Resolution(int& w, int& h, int& bits, bool& windowed) { w = h = bits = 0; windowed = true; }
 const RenderDeviceDescClass& WW3D::Get_Render_Device_Desc(int) { static RenderDeviceDescClass d; return d; }

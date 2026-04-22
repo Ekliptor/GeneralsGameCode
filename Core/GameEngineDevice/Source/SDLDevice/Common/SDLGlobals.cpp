@@ -42,4 +42,18 @@ namespace SDLDevice
 		return nullptr;
 #endif
 	}
+
+	bool getWindowPixelSize(int &w, int &h)
+	{
+		if (!TheSDLWindow)
+			return false;
+		int pw = 0, ph = 0;
+		if (!SDL_GetWindowSizeInPixels(TheSDLWindow, &pw, &ph))
+			return false;
+		if (pw <= 0 || ph <= 0)
+			return false;
+		w = pw;
+		h = ph;
+		return true;
+	}
 }

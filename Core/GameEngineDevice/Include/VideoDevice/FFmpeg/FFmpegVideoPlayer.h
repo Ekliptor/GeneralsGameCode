@@ -41,6 +41,7 @@
 class FFmpegFile;
 struct AVFrame;
 struct SwsContext;
+struct SwrContext;
 
 //----------------------------------------------------------------------------
 //           Type Defines
@@ -63,6 +64,10 @@ class FFmpegVideoStream : public VideoStream
 		Char			*m_memFile;				///< Pointer to memory resident file
 		UnsignedInt64	m_startTime = 0;		///< Time the stream started
 		UnsignedByte *	m_audioBuffer = nullptr;///< Audio buffer for the stream
+		SwrContext *	m_swrContext = nullptr;	///< Resampler: decoded PCM → interleaved S16 for OpenAL
+		int				m_swrInRate = 0;		///< Cached input sample rate (detects format changes)
+		int				m_swrInChannels = 0;	///< Cached input channel count
+		int				m_swrInFmt = -1;		///< Cached input AVSampleFormat (stored as int to avoid header dep)
 
 		FFmpegVideoStream(FFmpegFile* file);																///< only BinkVideoPlayer can create these
 		virtual ~FFmpegVideoStream();

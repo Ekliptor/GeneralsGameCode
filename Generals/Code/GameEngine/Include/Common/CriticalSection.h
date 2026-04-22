@@ -30,12 +30,14 @@
 
 #include <mutex>
 
-// std::mutex maps to SRWLOCK on MSVC/Windows >=7, futex on Linux, and unfair
-// on macOS — same order-of-magnitude as CRITICAL_SECTION for the uncontended
-// case, with no Win32 dependency. Non-recursive, matching the prior usage.
+// Win32 CRITICAL_SECTION is recursive (same thread can re-enter), and the
+// engine relies on that — e.g. AsciiString::set() holds the string mutex
+// across releaseBuffer() which can reach back into AsciiString paths on
+// the same thread during shutdown/teardown. std::recursive_mutex is the
+// faithful portable replacement; a plain std::mutex deadlocks on entry.
 class CriticalSection
 {
-	std::mutex m_mutex;
+	std::recursive_mutex m_mutex;
 
 	public:
 		CriticalSection() = default;

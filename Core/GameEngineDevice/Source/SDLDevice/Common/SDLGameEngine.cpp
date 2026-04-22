@@ -28,9 +28,12 @@
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
-// Win32 message constants reused when translating SDL mouse events so the
-// existing Win32Mouse::addWin32Event feeder can consume them unchanged.
-// See Win32Mouse::translateEvent() for the accepted message set.
+#else
+// osdep.h provides UINT/WPARAM/LPARAM + WM_* constants on non-Win32 so the
+// same translateMouseEvent helper can feed TheWin32Mouse (which is the same
+// object on every platform — W3DGameClient::createMouse always returns a
+// W3DMouse : Win32Mouse).
+#include <Utility/osdep.h>
 #endif
 
 SDLKeyboard *TheSDLKeyboard = nullptr;
@@ -39,7 +42,6 @@ extern Win32Mouse *TheWin32Mouse;
 SDLGameEngine::SDLGameEngine() = default;
 SDLGameEngine::~SDLGameEngine() = default;
 
-#ifdef _WIN32
 namespace
 {
 	LPARAM packMousePos(Sint32 x, Sint32 y)
@@ -98,7 +100,6 @@ namespace
 		}
 	}
 }
-#endif // _WIN32
 
 void SDLGameEngine::serviceWindowsOS()
 {
@@ -131,7 +132,6 @@ void SDLGameEngine::serviceWindowsOS()
 					TheSDLKeyboard->pushEvent(e);
 				break;
 
-#ifdef _WIN32
 			case SDL_EVENT_MOUSE_MOTION:
 			case SDL_EVENT_MOUSE_BUTTON_DOWN:
 			case SDL_EVENT_MOUSE_BUTTON_UP:
@@ -146,7 +146,6 @@ void SDLGameEngine::serviceWindowsOS()
 					TheWin32Mouse->addWin32Event(msg, wParam, lParam, e.common.timestamp / 1000000u);
 				break;
 			}
-#endif
 
 			default:
 				break;

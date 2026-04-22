@@ -43,7 +43,9 @@
 
 extern "C" {
 	#include <libavcodec/avcodec.h>
+	#include <libavutil/samplefmt.h>
 	#include <libswscale/swscale.h>
+	#include <libswresample/swresample.h>
 }
 
 #if RTS_AUDIO_OPENAL
@@ -306,7 +308,9 @@ FFmpegVideoStream::FFmpegVideoStream(FFmpegFile* file)
 		m_good = m_ffmpegFile->decodePacket();
 
  #if RTS_AUDIO_OPENAL
-	// Start audio playback
+	// Start audio playback. bufferData() also self-starts the source when it
+	// isn't already playing, so this is belt-and-suspenders for the case where
+	// the first packet was video and no audio has been queued yet.
 	audioStream->play();
 #endif
 
@@ -319,6 +323,7 @@ FFmpegVideoStream::FFmpegVideoStream(FFmpegFile* file)
 
 FFmpegVideoStream::~FFmpegVideoStream()
 {
+	swr_free(&m_swrContext);
 	av_freep(&m_audioBuffer);
 	av_frame_free(&m_frame);
 	sws_freeContext(m_swsContext);
@@ -337,36 +342,66 @@ void FFmpegVideoStream::onFrame(AVFrame *frame, int stream_idx, int stream_type,
 	else if (stream_type == AVMEDIA_TYPE_AUDIO) {
 		OpenALAudioStream* audioStream = (OpenALAudioStream*)TheAudio->getVideoAudioStreamHandle();
 		audioStream->update();
-		AVSampleFormat sampleFmt = static_cast<AVSampleFormat>(frame->format);
-		const int bytesPerSample = av_get_bytes_per_sample(sampleFmt);
-		const int frameSize = av_samples_get_buffer_size(nullptr, frame->ch_layout.nb_channels, frame->nb_samples, sampleFmt, 1);
-		uint8_t* frameData = frame->data[0];
-		// The format is planar - convert it to interleaved
-		if (av_sample_fmt_is_planar(sampleFmt))
+
+		const AVSampleFormat inFmt = static_cast<AVSampleFormat>(frame->format);
+		const int inCh   = frame->ch_layout.nb_channels;
+		const int inRate = frame->sample_rate;
+
+		// OpenAL only speaks mono/stereo 8/16-bit PCM. Any source layout wider
+		// than stereo (e.g. 5.1 on the Sizzle intro) has to be downmixed — feeding
+		// raw 6-channel bytes with AL_FORMAT_STEREO16 would play garbage or be
+		// rejected outright. Normalize: mono stays mono, everything else becomes
+		// stereo.
+		const int outCh = (inCh == 1) ? 1 : 2;
+		AVChannelLayout outLayout;
+		av_channel_layout_default(&outLayout, outCh);
+
+		if (videoStream->m_swrContext == nullptr
+			|| videoStream->m_swrInFmt      != inFmt
+			|| videoStream->m_swrInChannels != inCh
+			|| videoStream->m_swrInRate     != inRate)
 		{
-			videoStream->m_audioBuffer = static_cast<uint8_t*>(av_realloc(videoStream->m_audioBuffer, frameSize));
-			if (videoStream->m_audioBuffer == nullptr)
+			swr_free(&videoStream->m_swrContext);
+			const int swrErr = swr_alloc_set_opts2(&videoStream->m_swrContext,
+				&outLayout,        AV_SAMPLE_FMT_S16, inRate,
+				&frame->ch_layout, inFmt,             inRate,
+				0, nullptr);
+			if (swrErr < 0 || videoStream->m_swrContext == nullptr
+				|| swr_init(videoStream->m_swrContext) < 0)
 			{
-				DEBUG_LOG(("Failed to allocate audio buffer"));
+				DEBUG_LOG(("swr_init failed for video audio (fmt=%d ch=%d→%d rate=%d)",
+					inFmt, inCh, outCh, inRate));
+				swr_free(&videoStream->m_swrContext);
+				av_channel_layout_uninit(&outLayout);
 				return;
 			}
+			videoStream->m_swrInFmt      = inFmt;
+			videoStream->m_swrInChannels = inCh;
+			videoStream->m_swrInRate     = inRate;
+		}
+		av_channel_layout_uninit(&outLayout);
 
-			// Write the samples into our audio buffer
-			for (int sample_idx = 0; sample_idx < frame->nb_samples; sample_idx++)
-			{
-				int byte_offset = sample_idx * bytesPerSample;
-				for (int channel_idx = 0; channel_idx < frame->ch_layout.nb_channels; channel_idx++)
-				{
-					uint8_t* dst = &videoStream->m_audioBuffer[byte_offset * frame->ch_layout.nb_channels + channel_idx * bytesPerSample];
-					uint8_t* src = &frame->data[channel_idx][byte_offset];
-					memcpy(dst, src, bytesPerSample);
-				}
-			}
-			frameData = videoStream->m_audioBuffer;
+		const int outSize = av_samples_get_buffer_size(nullptr, outCh, frame->nb_samples, AV_SAMPLE_FMT_S16, 1);
+		if (outSize <= 0) {
+			return;
+		}
+		videoStream->m_audioBuffer = static_cast<uint8_t*>(av_realloc(videoStream->m_audioBuffer, outSize));
+		if (videoStream->m_audioBuffer == nullptr) {
+			DEBUG_LOG(("Failed to allocate audio buffer"));
+			return;
 		}
 
-		ALenum format = OpenALAudioManager::getALFormat(frame->ch_layout.nb_channels, bytesPerSample * 8);
-		audioStream->bufferData(frameData, frameSize, format, frame->sample_rate);
+		uint8_t* outPtrs[1] = { videoStream->m_audioBuffer };
+		const int converted = swr_convert(videoStream->m_swrContext,
+			outPtrs, frame->nb_samples,
+			const_cast<const uint8_t**>(frame->extended_data), frame->nb_samples);
+		if (converted <= 0) {
+			return;
+		}
+
+		const int bytesWritten = converted * outCh * static_cast<int>(sizeof(int16_t));
+		const ALenum format = OpenALAudioManager::getALFormat(outCh, 16);
+		audioStream->bufferData(videoStream->m_audioBuffer, bytesWritten, format, inRate);
 	}
 #endif
 }

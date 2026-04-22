@@ -1176,22 +1176,64 @@ void DX8Caps::Vendor_Specific_Hacks(const D3DADAPTER_IDENTIFIER8& adapter_id)
 
 #else // !RTS_RENDERER_DX8
 // ============================================================================
-// Non-DX8 (bgfx) build — DX8Caps stubs returning safe defaults.
+// Non-DX8 (bgfx) build — DX8Caps with permissive defaults. Callers in bgfx
+// mode use this to gate hardware-feature decisions (format support, texture
+// slots, etc.); we say "yes" to the common render/texture formats and let
+// the bgfx backend reject anything it doesn't actually support at upload
+// time. This keeps the DX8-era ask-before-use pattern working without the
+// real D3D caps query.
 // ============================================================================
+
+#define DX8CAPS_BGFX_INIT_PERMISSIVE()                                          \
+	do {                                                                         \
+		memset(&Caps, 0, sizeof(Caps));                                          \
+		for (int i = 0; i < WW3D_FORMAT_COUNT; ++i) {                            \
+			SupportTextureFormat[i]         = true;                              \
+			SupportRenderToTextureFormat[i] = true;                              \
+		}                                                                        \
+		for (int i = 0; i < WW3D_ZFORMAT_COUNT; ++i) {                           \
+			SupportDepthStencilFormat[i] = true;                                 \
+		}                                                                        \
+		SupportTnL                   = true;                                     \
+		SupportDXTC                  = true;                                     \
+		supportGamma                 = false;                                    \
+		SupportNPatches              = false;                                    \
+		SupportBumpEnvmap            = false;                                    \
+		SupportBumpEnvmapLuminance   = false;                                    \
+		SupportZBias                 = true;                                     \
+		SupportAnisotropicFiltering  = true;                                     \
+		SupportModAlphaAddClr        = true;                                     \
+		SupportDot3                  = true;                                     \
+		SupportPointSprites          = true;                                     \
+		SupportCubemaps              = true;                                     \
+		CanDoMultiPass               = true;                                     \
+		IsFogAllowed                 = true;                                     \
+		MaxDisplayWidth              = 4096;                                     \
+		MaxDisplayHeight             = 4096;                                     \
+		MaxTexturesPerPass           = 8;                                        \
+		MaxSimultaneousTextures      = 8;                                        \
+		VertexShaderVersion          = 0x0101;                                   \
+		PixelShaderVersion           = 0x0104;                                   \
+		VendorId                     = VENDOR_UNKNOWN;                           \
+		DeviceId                     = 0;                                        \
+		DriverBuildVersion           = 0;                                        \
+		DriverVersionStatus          = DRIVER_STATUS_GOOD;                       \
+		Direct3D                     = nullptr;                                  \
+	} while (0)
 
 DX8Caps::DX8Caps(IDirect3D8*, const D3DCAPS8&, WW3DFormat, const D3DADAPTER_IDENTIFIER8&)
 {
-	memset(&Caps, 0, sizeof(Caps));
+	DX8CAPS_BGFX_INIT_PERMISSIVE();
 }
 
 DX8Caps::DX8Caps(IDirect3D8*, IDirect3DDevice8*, WW3DFormat, const D3DADAPTER_IDENTIFIER8&)
 {
-	memset(&Caps, 0, sizeof(Caps));
+	DX8CAPS_BGFX_INIT_PERMISSIVE();
 }
 
 void DX8Caps::Shutdown() {}
 void DX8Caps::Compute_Caps(WW3DFormat, const D3DADAPTER_IDENTIFIER8&) {}
-bool DX8Caps::Is_Valid_Display_Format(int, int, WW3DFormat) { return false; }
+bool DX8Caps::Is_Valid_Display_Format(int, int, WW3DFormat) { return true; }
 
 #endif // RTS_RENDERER_DX8
 

@@ -90,10 +90,26 @@ public:
 	void DrawSmokeVColorQuad();
 	void DrawSmokeLitQuad();
 
+public:
+	// Phase 5i — the game configures viewports and scissor rects in LOGICAL
+	// game pixels (e.g. 800x600) while the bgfx back-buffer is the real
+	// drawable size (3008x1692 on a fullscreen Retina display). Without a
+	// scale the default viewport covers the full framebuffer but explicit
+	// Set_Viewport(0,0,800,600) calls collapse the render into the top-left
+	// corner, leaving the rest as the clear color (the "pink border"). This
+	// setter stores the logical dims so Set_Viewport can scale by
+	// physical/logical. A value of 0 disables scaling (1:1 mapping).
+	void Set_Logical_Resolution(int logicalW, int logicalH);
+
 private:
 	bool m_initialized = false;
 	int m_width = 0;
 	int m_height = 0;
+	// Logical game resolution. Zero means "no scale, inputs already in
+	// back-buffer pixels" (keeps the smoke tests and any future 1:1 cases
+	// working without special-casing).
+	int m_logicalW = 0;
+	int m_logicalH = 0;
 
 	// ---- Phase 5e/5f smoke-test resources --------------------------------
 

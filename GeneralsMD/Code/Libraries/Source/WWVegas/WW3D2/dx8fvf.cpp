@@ -41,6 +41,7 @@
 
 #include "dx8fvf.h"
 #include "wwstring.h"
+#include <cstdint>
 
 static unsigned Get_FVF_Vertex_Size(unsigned FVF)
 {
@@ -58,8 +59,8 @@ static unsigned Get_FVF_Vertex_Size(unsigned FVF)
 
 	if (FVF & D3DFVF_NORMAL)   size += 3 * sizeof(float);
 	if (FVF & D3DFVF_PSIZE)    size += sizeof(float);
-	if (FVF & D3DFVF_DIFFUSE)  size += sizeof(DWORD);
-	if (FVF & D3DFVF_SPECULAR) size += sizeof(DWORD);
+	if (FVF & D3DFVF_DIFFUSE)  size += sizeof(uint32_t);
+	if (FVF & D3DFVF_SPECULAR) size += sizeof(uint32_t);
 
 	unsigned numTexCoords = (FVF & D3DFVF_TEXCOUNT_MASK) >> D3DFVF_TEXCOUNT_SHIFT;
 	for (unsigned i = 0; i < numTexCoords; i++) {
@@ -87,16 +88,16 @@ FVFInfoClass::FVFInfoClass(unsigned FVF_, unsigned vertex_size)
 	normal_offset=blend_offset;
 
 	if ( ((FVF&D3DFVF_XYZB4)==D3DFVF_XYZB4) &&
-		  ((FVF&D3DFVF_LASTBETA_UBYTE4)==D3DFVF_LASTBETA_UBYTE4) ) normal_offset+=3*sizeof(float)+sizeof(DWORD);
+		  ((FVF&D3DFVF_LASTBETA_UBYTE4)==D3DFVF_LASTBETA_UBYTE4) ) normal_offset+=3*sizeof(float)+sizeof(uint32_t);
 	diffuse_offset=normal_offset;
 
 	if ((FVF&D3DFVF_NORMAL)==D3DFVF_NORMAL) diffuse_offset+=3*sizeof(float);
 	specular_offset=diffuse_offset;
 
-	if ((FVF&D3DFVF_DIFFUSE)==D3DFVF_DIFFUSE) specular_offset+=sizeof(DWORD);
+	if ((FVF&D3DFVF_DIFFUSE)==D3DFVF_DIFFUSE) specular_offset+=sizeof(uint32_t);
 	texcoord_offset[0]=specular_offset;
 
-	if ((FVF&D3DFVF_SPECULAR)==D3DFVF_SPECULAR) texcoord_offset[0]+=sizeof(DWORD);
+	if ((FVF&D3DFVF_SPECULAR)==D3DFVF_SPECULAR) texcoord_offset[0]+=sizeof(uint32_t);
 
 	for (unsigned int i=1; i<D3DDP_MAXTEXCOORD; i++)
 	{

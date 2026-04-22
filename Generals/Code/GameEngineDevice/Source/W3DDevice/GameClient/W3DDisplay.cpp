@@ -99,6 +99,14 @@ static void drawFramerateBar();
 #include "WW3D2/rddesc.h"
 #include "TARGA.h"
 
+#ifndef RTS_RENDERER_DX8
+#include "BGFXDevice/Common/BgfxTextureCache.h"
+#include "Common/File.h"
+#include <cstdio>
+#include <cstring>
+#include <string>
+#endif
+
 #include "GameLogic/ScriptEngine.h"		// For TheScriptEngine - jkmcd
 #include "GameLogic/GameLogic.h"
 #ifdef DUMP_PERF_STATS
@@ -109,6 +117,49 @@ static void drawFramerateBar();
 
 
 // DEFINE AND ENUMS ///////////////////////////////////////////////////////////
+
+#ifndef RTS_RENDERER_DX8
+namespace {
+// File reader for BgfxTextureCache — routes through TheFileSystem so BIG
+// archives resolve on macOS. See GeneralsMD/.../W3DDisplay.cpp for the full
+// rationale; this is the Generals-build mirror.
+bool readViaFS(const char* path, std::vector<uint8_t>& out)
+{
+	auto readFile = [](const char* p, std::vector<uint8_t>& dst) -> bool {
+		File* f = TheFileSystem->openFile(p, File::READ | File::BINARY);
+		if (!f) return false;
+		const Int size = f->size();
+		if (size <= 0) { f->close(); return false; }
+		dst.resize(static_cast<size_t>(size));
+		const Int got = f->read(dst.data(), size);
+		f->close();
+		return got == size;
+	};
+
+	if (TheFileSystem) {
+		const bool hasSep = std::strchr(path, '/') || std::strchr(path, '\\');
+		if (!hasSep) {
+			std::string prefixed;
+			prefixed.reserve(std::strlen(path) + 13);
+			prefixed.append("Art\\Textures\\").append(path);
+			if (readFile(prefixed.c_str(), out)) return true;
+		}
+		if (readFile(path, out)) return true;
+	}
+
+	FILE* fh = std::fopen(path, "rb");
+	if (!fh) return false;
+	std::fseek(fh, 0, SEEK_END);
+	const long size = std::ftell(fh);
+	std::fseek(fh, 0, SEEK_SET);
+	if (size <= 0) { std::fclose(fh); return false; }
+	out.resize(static_cast<size_t>(size));
+	const size_t got = std::fread(out.data(), 1, out.size(), fh);
+	std::fclose(fh);
+	return got == out.size();
+}
+} // namespace
+#endif
 
 #define no_SAMPLE_DYNAMIC_LIGHT	1
 #ifdef SAMPLE_DYNAMIC_LIGHT
@@ -585,6 +636,10 @@ void W3DDisplay::init()
 	// Override the W3D File system
 	TheW3DFileSystem = NEW W3DFileSystem;
 
+#ifndef RTS_RENDERER_DX8
+	BgfxTextureCache::Set_File_Reader(&readViaFS);
+#endif
+
 	// init the Westwood math library
 	WWMath::Init();
 
@@ -657,7 +712,18 @@ void W3DDisplay::init()
 		WW3D::Set_Collision_Box_Display_Mask(0x00);	///<set to 0xff to make collision boxes visible
 		WW3D::Enable_Static_Sort_Lists(true);
 		WW3D::Set_Thumbnail_Enabled(false);
+		// D3D8 samples texels at pixel corners — Render2DClass compensates by
+		// shifting every vertex by -0.5 logical pixels. Metal/bgfx samples at
+		// pixel centers, so the shift instead produces a drawable-pixel gap
+		// at right/bottom (proportional to the logical-to-physical scale).
+		// Compile-time gate: bgfx builds never need the bias. Runtime check
+		// is too early — RenderBackendRuntime isn't populated until the
+		// first Set_Render_Device call, which happens after this init block.
+#ifdef RTS_RENDERER_DX8
 		WW3D::Set_Screen_UV_Bias( TRUE );  ///< this makes text look good :)
+#else
+		WW3D::Set_Screen_UV_Bias( FALSE );
+#endif
 
 		setWindowed( TheGlobalData->m_windowed );
 

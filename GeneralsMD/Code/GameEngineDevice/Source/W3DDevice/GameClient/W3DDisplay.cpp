@@ -42,6 +42,10 @@ static void drawFramerateBar();
 #endif
 #include <time.h>
 
+#ifndef _WIN32
+#include "SDLDevice/Common/SDLGlobals.h"
+#endif
+
 // USER INCLUDES //////////////////////////////////////////////////////////////
 #include "Common/FramePacer.h"
 #include "Common/ThingFactory.h"
@@ -102,6 +106,14 @@ static void drawFramerateBar();
 #include "WW3D2/rddesc.h"
 #include "TARGA.h"
 
+#ifndef RTS_RENDERER_DX8
+#include "BGFXDevice/Common/BgfxTextureCache.h"
+#include "Common/File.h"
+#include <cstdio>
+#include <cstring>
+#include <string>
+#endif
+
 #include "GameLogic/ScriptEngine.h"		// For TheScriptEngine - jkmcd
 #include "GameLogic/GameLogic.h"
 #ifdef DUMP_PERF_STATS
@@ -112,6 +124,53 @@ static void drawFramerateBar();
 
 
 // DEFINE AND ENUMS ///////////////////////////////////////////////////////////
+
+#ifndef RTS_RENDERER_DX8
+namespace {
+// File reader for BgfxTextureCache that routes through TheFileSystem so BIG
+// archives (TexturesZH.big / WindowZH.big / …) are visible on macOS where we
+// don't stage an extracted Art/Textures/ tree. Bare filenames (UI chrome like
+// "titlescreenuserinterface.tga", which come from TextureClass::Get_Full_Path
+// without a directory prefix) get Art\Textures\ prepended, mirroring the
+// implicit prefix that GameFileClass::Set_Name applies on the W3D path.
+// Falls back to stdio for absolute / dev paths that don't live in an archive.
+bool readViaFS(const char* path, std::vector<uint8_t>& out)
+{
+	auto readFile = [](const char* p, std::vector<uint8_t>& dst) -> bool {
+		File* f = TheFileSystem->openFile(p, File::READ | File::BINARY);
+		if (!f) return false;
+		const Int size = f->size();
+		if (size <= 0) { f->close(); return false; }
+		dst.resize(static_cast<size_t>(size));
+		const Int got = f->read(dst.data(), size);
+		f->close();
+		return got == size;
+	};
+
+	if (TheFileSystem) {
+		const bool hasSep = std::strchr(path, '/') || std::strchr(path, '\\');
+		if (!hasSep) {
+			std::string prefixed;
+			prefixed.reserve(std::strlen(path) + 13);
+			prefixed.append("Art\\Textures\\").append(path);
+			if (readFile(prefixed.c_str(), out)) return true;
+		}
+		if (readFile(path, out)) return true;
+	}
+
+	FILE* fh = std::fopen(path, "rb");
+	if (!fh) return false;
+	std::fseek(fh, 0, SEEK_END);
+	const long size = std::ftell(fh);
+	std::fseek(fh, 0, SEEK_SET);
+	if (size <= 0) { std::fclose(fh); return false; }
+	out.resize(static_cast<size_t>(size));
+	const size_t got = std::fread(out.data(), 1, out.size(), fh);
+	std::fclose(fh);
+	return got == out.size();
+}
+} // namespace
+#endif
 
 #define no_SAMPLE_DYNAMIC_LIGHT	1
 #ifdef SAMPLE_DYNAMIC_LIGHT
@@ -570,6 +629,7 @@ void W3DDisplay::setWidth( UnsignedInt width )
 	// our 2D renderer will use mapping coords to make (0,0) the upper left
 	// of the screen with (width,height) at the lower right
 	m_2DRender->Set_Coordinate_Range( RectClass( 0, 0, getWidth(), getHeight() ) );
+	Render2DClass::Set_Screen_Resolution( RectClass( 0, 0, getWidth(), getHeight() ) );
 
 }
 
@@ -585,6 +645,7 @@ void W3DDisplay::setHeight( UnsignedInt height )
 	// our 2D renderer will use mapping coords to make (0,0) the upper left
 	// of the screen with (width,height) at the lower right
 	m_2DRender->Set_Coordinate_Range( RectClass( 0, 0, getWidth(), getHeight() ) );
+	Render2DClass::Set_Screen_Resolution( RectClass( 0, 0, getWidth(), getHeight() ) );
 
 }
 
@@ -636,6 +697,12 @@ void W3DDisplay::init()
 	}
 	// Override the W3D File system
 	TheW3DFileSystem = NEW W3DFileSystem;
+
+#ifndef RTS_RENDERER_DX8
+	// Route the bgfx texture cache through TheFileSystem so BIG archives +
+	// localized paths resolve the same way the rest of the engine does.
+	BgfxTextureCache::Set_File_Reader(&readViaFS);
+#endif
 
 	// init the Westwood math library
 	WWMath::Init();
@@ -706,7 +773,10 @@ void W3DDisplay::init()
 		if (WW3D::Init( ApplicationHWnd ) != WW3D_ERROR_OK)
 			throw ERROR_INVALID_D3D;	//failed to initialize.  User probably doesn't have DX 8.1
 #else
-		if (WW3D::Init( nullptr ) != WW3D_ERROR_OK)
+		// macOS/Linux: pull the native window pointer from SDL so bgfx has an
+		// actual surface to render into. Previously `nullptr` was passed, which
+		// short-circuited BgfxBootstrap::Ensure_Init and left the window black.
+		if (WW3D::Init( SDLDevice::getNativeWindowHandle() ) != WW3D_ERROR_OK)
 			throw ERROR_INVALID_D3D;	//failed to initialize.
 #endif
 
@@ -714,7 +784,18 @@ void W3DDisplay::init()
 		WW3D::Set_Collision_Box_Display_Mask(0x00);	///<set to 0xff to make collision boxes visible
 		WW3D::Enable_Static_Sort_Lists(true);
 		WW3D::Set_Thumbnail_Enabled(false);
+		// D3D8 samples texels at pixel corners — Render2DClass compensates by
+		// shifting every vertex by -0.5 logical pixels. Metal/bgfx samples at
+		// pixel centers, so the shift instead produces a drawable-pixel gap
+		// at right/bottom (proportional to the logical-to-physical scale).
+		// Compile-time gate: bgfx builds never need the bias. Runtime check
+		// is too early — RenderBackendRuntime isn't populated until the
+		// first Set_Render_Device call, which happens after this init block.
+#ifdef RTS_RENDERER_DX8
 		WW3D::Set_Screen_UV_Bias( TRUE );  ///< this makes text look good :)
+#else
+		WW3D::Set_Screen_UV_Bias( FALSE );
+#endif
 		WW3D::Set_Texture_Bitdepth(32);
 
 		setWindowed( TheGlobalData->m_windowed );
@@ -2603,7 +2684,6 @@ void W3DDisplay::drawRemainingRectClock(Int startX, Int startY, Int width, Int h
 void W3DDisplay::drawImage( const Image *image, Int startX, Int startY,
 														Int endX, Int endY, Color color, DrawImageMode mode)
 {
-
 	// sanity
 	if( image == nullptr )
 		return;

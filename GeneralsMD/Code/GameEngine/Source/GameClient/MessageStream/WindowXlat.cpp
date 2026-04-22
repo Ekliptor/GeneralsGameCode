@@ -229,6 +229,22 @@ GameMessageDisposition WindowTranslator::translateGameMessage(const GameMessage 
 		case GameMessage::MSG_RAW_MOUSE_RIGHT_DOUBLE_CLICK:
 		case GameMessage::MSG_RAW_MOUSE_RIGHT_BUTTON_UP:
 		{
+			// Skip the intro movie on any mouse button release, mirroring the
+			// ESC shortcut handled further down. UP (not DOWN) matches ESC's
+			// KEY_STATE_UP semantics and prevents the click's release from
+			// registering on a main-menu button that appeared behind.
+			const GameMessage::Type t = msg->getType();
+			if ((t == GameMessage::MSG_RAW_MOUSE_LEFT_BUTTON_UP
+			  || t == GameMessage::MSG_RAW_MOUSE_RIGHT_BUTTON_UP
+			  || t == GameMessage::MSG_RAW_MOUSE_MIDDLE_BUTTON_UP)
+			  && TheDisplay && TheDisplay->isMoviePlaying()
+			  && TheGlobalData && TheGlobalData->m_allowExitOutOfMovies == TRUE)
+			{
+				TheDisplay->stopMovie();
+				returnCode = WIN_INPUT_USED;
+				break;
+			}
+
 			// all window events have the position of the mouse as arg 0
 			ICoord2D mousePos = msg->getArgument( 0 )->pixel;
 #if defined(RTS_DEBUG)	//debug hack to view object under mouse stats

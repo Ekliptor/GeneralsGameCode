@@ -29,6 +29,8 @@
 #include "Common/FileSystem.h"
 #include "Common/file.h"
 
+#include <cstdint>
+
 
 
 LanguageFilter *TheLanguageFilter = nullptr;
@@ -151,30 +153,35 @@ void LanguageFilter::unHaxor(UnicodeString &word) {
 }
 
 // returning true means that there are more words in the file.
+// langdata.dat was authored on Windows where wchar_t is 2 bytes (UTF-16LE).
+// WideChar / wchar_t is 4 bytes on macOS / Linux, so we always read the file
+// 16 bits at a time and zero-extend into the caller's WideChar buffer —
+// otherwise each read would consume two source chars at once and the space
+// separator would never be detected, overrunning the 128-slot stack buffer.
 Bool LanguageFilter::readWord(File *file1, WideChar *buf) {
+	constexpr int kMaxIndex = 127;  // leave room for the trailing null in caller's wchar_t[128]
 	Int index = 0;
 	Bool retval = TRUE;
-	Int val = 0;
 
-	WideChar c;
-
-	val = file1->read(&c, sizeof(WideChar));
+	uint16_t raw = 0;
+	Int val = file1->read(&raw, sizeof(uint16_t));
 	if ((val == -1) || (val == 0)) {
 		buf[index] = 0;
 		return FALSE;
 	}
-	buf[index] = c;
+	buf[index] = static_cast<WideChar>(raw);
 
 	while (buf[index] != L' ') {
-		++index;
-		val = file1->read(&c, sizeof(WideChar));
-		if ((val == -1) || (val == 0)) {
-			c = WEOF;
+		if (index < kMaxIndex) {
+			++index;
 		}
+		val = file1->read(&raw, sizeof(uint16_t));
+		const bool eof = (val == -1) || (val == 0);
+		const WideChar c = eof ? static_cast<WideChar>(WEOF) : static_cast<WideChar>(raw);
 
-		if ((c == WEOF) || (c == L' ')) {
+		if (eof || c == L' ') {
 			buf[index] = 0;
-			if (c == WEOF) {
+			if (eof) {
 				retval = FALSE;
 			}
 			break;

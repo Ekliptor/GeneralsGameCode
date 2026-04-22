@@ -31,6 +31,8 @@
 #include "AudibleSound.h"
 #include "persistfactory.h"
 #include "WWLib/registry.h"
+#include "hashtemplate.h"
+#include "string_compat.h"
 #include <float.h>
 #include <cstring>
 
@@ -196,10 +198,92 @@ RenderObjIterator * WW3DAssetManager::Create_Render_Obj_Iterator() { return null
 void WW3DAssetManager::Release_Render_Obj_Iterator(RenderObjIterator * /*it*/) {}
 AssetIterator * WW3DAssetManager::Create_HAnim_Iterator() { return nullptr; }
 HAnimClass * WW3DAssetManager::Get_HAnim(const char * /*name*/) { return nullptr; }
-TextureClass * WW3DAssetManager::Get_Texture(const char * /*filename*/, MipCountType /*mip*/, WW3DFormat /*fmt*/, bool /*allow_compression*/, TextureBaseClass::TexAssetType /*type*/, bool /*allow_reduction*/) { return nullptr; }
-void WW3DAssetManager::Release_All_Textures() {}
-void WW3DAssetManager::Release_Unused_Textures() {}
-void WW3DAssetManager::Release_Texture(TextureClass * /*tex*/) {}
+
+// ---------------------------------------------------------------------------
+// Texture hash-cache implementations mirror the real DX8 asset manager
+// (Generals/Code/Libraries/Source/WWVegas/WW3D2/assetmgr.cpp). The code is
+// device-independent: TextureClass::Init() already has a real bgfx path via
+// BgfxTextureCache::Get_Or_Load_File, so constructing a TextureClass here is
+// safe even though the DX8 renderer isn't linked.
+TextureClass * WW3DAssetManager::Get_Texture(
+    const char * filename,
+    MipCountType mip_level_count,
+    WW3DFormat texture_format,
+    bool allow_compression,
+    TextureBaseClass::TexAssetType type,
+    bool allow_reduction)
+{
+    if (texture_format == WW3D_FORMAT_U8V8) {
+        mip_level_count = MIP_LEVELS_1;
+    }
+    if (filename == nullptr || *filename == '\0') {
+        return nullptr;
+    }
+
+    StringClass lower_case_name(filename, true);
+    _strlwr(lower_case_name.Peek_Buffer());
+
+    TextureClass * tex = TextureHash.Get(lower_case_name);
+    if (!tex) {
+        if (type == TextureBaseClass::TEX_REGULAR) {
+            tex = NEW_REF(TextureClass, (lower_case_name, nullptr, mip_level_count, texture_format, allow_compression, allow_reduction));
+        } else {
+            // CubeTextureClass/VolumeTextureClass ctors are DX8-only today.
+            // ToDo Phase 5h+: provide bgfx cube/volume texture ctors.
+            return nullptr;
+        }
+        TextureHash.Insert(tex->Get_Texture_Name(), tex);
+    }
+
+    tex->Add_Ref();
+    return tex;
+}
+
+void WW3DAssetManager::Release_All_Textures()
+{
+    HashTemplateIterator<StringClass, TextureClass*> ite(TextureHash);
+    for (ite.First(); !ite.Is_Done(); ite.Next()) {
+        TextureClass * tex = ite.Peek_Value();
+        tex->Release_Ref();
+    }
+    TextureHash.Remove_All();
+}
+
+void WW3DAssetManager::Release_Unused_Textures()
+{
+    unsigned count = 0;
+    TextureClass * temp_textures[256];
+
+    HashTemplateIterator<StringClass, TextureClass*> ite(TextureHash);
+    for (ite.First(); !ite.Is_Done(); ite.Next()) {
+        TextureClass * tex = ite.Peek_Value();
+        if (tex->Num_Refs() == 1) {
+            temp_textures[count++] = tex;
+            if (count == 256) {
+                for (unsigned i = 0; i < 256; ++i) {
+                    TextureHash.Remove(temp_textures[i]->Get_Texture_Name());
+                    temp_textures[i]->Release_Ref();
+                }
+                count = 0;
+                ite.First();
+            }
+        }
+    }
+    for (unsigned i = 0; i < count; ++i) {
+        TextureHash.Remove(temp_textures[i]->Get_Texture_Name());
+        temp_textures[i]->Release_Ref();
+    }
+}
+
+void WW3DAssetManager::Release_Texture(TextureClass * tex)
+{
+    if (tex == nullptr) {
+        return;
+    }
+    TextureHash.Remove(tex->Get_Texture_Name());
+    tex->Release_Ref();
+}
+
 void WW3DAssetManager::Load_Procedural_Textures() {}
 Font3DInstanceClass * WW3DAssetManager::Get_Font3DInstance(const char * /*name*/) { return nullptr; }
 FontCharsClass * WW3DAssetManager::Get_FontChars(const char * /*name*/, int /*point_size*/, bool /*is_bold*/) { return nullptr; }
@@ -353,12 +437,28 @@ int FontCharsClass::Get_Char_Spacing(WCHAR /*ch*/) { return 0; }
 // TextureClass / TextureLoader / surfaceclass helpers
 // ============================================================================
 
-SurfaceClass * TextureClass::Get_Surface_Level(unsigned int /*level*/) { return nullptr; }
+SurfaceClass * TextureClass::Get_Surface_Level(unsigned int /*level*/)
+{
+    // Allocate a CPU-backed SurfaceClass sized to match the texture and bind
+    // it to the bgfx handle so Unlock uploads the written pixels back. The
+    // caller owns a ref and releases when done; the surface's CPU buffer is
+    // destroyed with it.
+    // ToDo: honor `level` for mip levels > 0 (bgfx currently generates mips
+    // internally). Startup-path callers only ask for level 0.
+    const unsigned w = static_cast<unsigned>(Get_Width()  > 0 ? Get_Width()  : 1);
+    const unsigned h = static_cast<unsigned>(Get_Height() > 0 ? Get_Height() : 1);
+    const WW3DFormat fmt = TextureFormat != WW3D_FORMAT_UNKNOWN
+                             ? TextureFormat
+                             : WW3D_FORMAT_A8R8G8B8;
+    SurfaceClass * surface = NEW_REF(SurfaceClass, (w, h, fmt));
+    surface->Set_Associated_Texture(Peek_Bgfx_Handle());
+    return surface;
+}
 void TextureClass::Get_Level_Description(SurfaceClass::SurfaceDescription & desc, unsigned int /*level*/)
 {
-    desc.Width = 0;
-    desc.Height = 0;
-    desc.Format = WW3D_FORMAT_UNKNOWN;
+    desc.Width  = static_cast<unsigned>(Get_Width()  > 0 ? Get_Width()  : 0);
+    desc.Height = static_cast<unsigned>(Get_Height() > 0 ? Get_Height() : 0);
+    desc.Format = TextureFormat;
 }
 
 void TextureLoader::Validate_Texture_Size(unsigned & /*width*/, unsigned & /*height*/, unsigned & /*depth*/) {}
@@ -368,10 +468,9 @@ TextureClass * Load_Texture(ChunkLoadClass & /*cload*/) { return nullptr; }
 void Convert_Pixel(unsigned char * /*pixel*/, const SurfaceClass::SurfaceDescription & /*sd*/, const Vector3 & /*rgb*/) {}
 
 // ============================================================================
-// DX8Wrapper::Set_World_Identity
+// DX8Wrapper::Set_World_Identity / Set_View_Identity
+// — real implementations live in Core/.../dx8wrapper.cpp (bgfx branch) now
 // ============================================================================
-
-void DX8Wrapper::Set_World_Identity() {}
 
 // ============================================================================
 // DX8MeshRenderer family + TheDX8MeshRenderer global
