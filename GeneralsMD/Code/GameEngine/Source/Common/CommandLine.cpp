@@ -37,14 +37,20 @@
 #include "GameNetwork/NetworkDefs.h"
 #include "trim.h"
 
+#include <cstring>
+
 #ifndef _WIN32
 #ifdef __APPLE__
 #include <crt_externs.h>
 #endif
 // Reconstruct a Win32-style single-line command-line string from argv on
 // non-Windows. The original parseCommandLine() tokenizes GetCommandLineA()'s
-// output with a quote-and-space split; quoting each argv entry preserves
-// arguments with embedded spaces.
+// output with a quote-and-space split; the tokenizer's quote-stripping only
+// kicks in when a token STARTS with a quote character, and after the first
+// token it switches to space-based splitting — so tokens 2+ keep their
+// surrounding quotes verbatim. To stay compatible we only quote args that
+// actually need it (contain a space), matching how Win32 GetCommandLineA
+// reflects the raw command line.
 static std::string GetCommandLineA()
 {
 #ifdef __APPLE__
@@ -59,9 +65,10 @@ static std::string GetCommandLineA()
     std::string out;
     for (int i = 0; i < argc; ++i) {
         if (i > 0) out.push_back(' ');
-        out.push_back('"');
-        out.append(argv[i]);
-        out.push_back('"');
+        const bool needsQuoting = (argv[i] == nullptr || argv[i][0] == '\0' || std::strchr(argv[i], ' ') != nullptr);
+        if (needsQuoting) out.push_back('"');
+        if (argv[i] != nullptr) out.append(argv[i]);
+        if (needsQuoting) out.push_back('"');
     }
     return out;
 }
@@ -835,6 +842,25 @@ Int parseShellMap(char *args[], int num)
 	return 2;
 }
 
+// `-screenshot <path>` — arm a one-shot main-menu screenshot to <path> and
+// skip the EA logo + Sizzle intros so we reach the main menu immediately.
+// The actual capture happens in GameClient::update once the shell is
+// active; the path travels there via TheGlobalData->m_screenshotPath.
+Int parseScreenshot(char *args[], int num)
+{
+	if (num > 1)
+	{
+		TheWritableGlobalData->m_screenshotPath = args[1];
+		TheWritableGlobalData->m_screenshotCountdownFrames = 300;
+		// Piggyback on -nologo's flag trio so the intro is skipped.
+		TheWritableGlobalData->m_playIntro  = FALSE;
+		TheWritableGlobalData->m_afterIntro = TRUE;
+		TheWritableGlobalData->m_playSizzle = FALSE;
+		return 2;
+	}
+	return 1;
+}
+
 Int parseNoWindowAnimation(char *args[], int num)
 {
 	TheWritableGlobalData->m_animateWindows = FALSE;
@@ -1191,6 +1217,7 @@ static CommandLineParam paramsForStartup[] =
 static CommandLineParam paramsForEngineInit[] =
 {
 	{ "-nologo", parseNoLogo }, // TheSuperHackers @tweak Is now available in Release builds.
+	{ "-screenshot", parseScreenshot },
 	{ "-noshellmap", parseNoShellMap },
 	{ "-noShellAnim", parseNoWindowAnimation }, // TheSuperHackers @tweak Is now available in Release builds.
 	{ "-xres", parseXRes },

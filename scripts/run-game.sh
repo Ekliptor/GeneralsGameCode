@@ -28,6 +28,10 @@
 #   --no-run        Stage assets but do not launch the game.
 #   -h | --help     Show this help.
 #
+# Any arguments after a `--` separator are forwarded verbatim to the game
+# executable. Example:
+#   scripts/run-game.sh -- -screenshot /tmp/menu.tga -win
+#
 # Environment overrides:
 #   ASSETS_DIR, GENERALS_ASSETS_DIR, TARGET, MODE, BUILD_DIR
 #   — same as the flags above.
@@ -37,6 +41,27 @@ set -euo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 
+# Load repo-root .env (gitignored) so ASSETS_DIR / GENERALS_ASSETS_DIR and
+# friends can be persisted locally without re-typing them every run. Values
+# already present in the shell environment win over .env; CLI flags still
+# override both. Supports KEY=VALUE lines with optional single/double quotes.
+if [[ -f "${REPO_ROOT}/.env" ]]; then
+    while IFS= read -r __env_line || [[ -n "${__env_line}" ]]; do
+        [[ "${__env_line}" =~ ^[[:space:]]*(#|$) ]] && continue
+        [[ "${__env_line}" =~ ^[[:space:]]*(export[[:space:]]+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]] || continue
+        __env_key="${BASH_REMATCH[2]}"
+        __env_val="${BASH_REMATCH[3]}"
+        if [[ "${__env_val}" =~ ^\"(.*)\"$ ]] || [[ "${__env_val}" =~ ^\'(.*)\'$ ]]; then
+            __env_val="${BASH_REMATCH[1]}"
+        fi
+        if [[ -z "${!__env_key:-}" ]]; then
+            printf -v "${__env_key}" '%s' "${__env_val}"
+            export "${__env_key}"
+        fi
+    done < "${REPO_ROOT}/.env"
+    unset __env_line __env_key __env_val
+fi
+
 ASSETS_DIR="${ASSETS_DIR:-}"
 GENERALS_ASSETS_DIR="${GENERALS_ASSETS_DIR:-}"
 TARGET="${TARGET:-zh}"
@@ -44,6 +69,7 @@ MODE="${MODE:-symlink}"
 BUILD_DIR="${BUILD_DIR:-build_bgfx}"
 RUN_AFTER_STAGE=1
 FORCE_RESTAGE=0
+GAME_ARGS=()
 
 usage() { sed -n '2,31p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
 
@@ -57,6 +83,7 @@ while (($#)); do
         --no-run)            RUN_AFTER_STAGE=0;        shift ;;
         --restage)           FORCE_RESTAGE=1;          shift ;;
         -h|--help)           usage; exit 0 ;;
+        --)                  shift; GAME_ARGS=("$@");  break ;;
         *)
             if [[ -z "${ASSETS_DIR}" && -d "$1" ]]; then
                 ASSETS_DIR="$1"; shift
@@ -294,5 +321,10 @@ if [[ ! -x "${EXEC}" ]]; then
     exit 1
 fi
 
-echo "Launching ${EXEC}"
-exec "${EXEC}"
+if ((${#GAME_ARGS[@]})); then
+    echo "Launching ${EXEC} ${GAME_ARGS[*]}"
+    exec "${EXEC}" "${GAME_ARGS[@]}"
+else
+    echo "Launching ${EXEC}"
+    exec "${EXEC}"
+fi

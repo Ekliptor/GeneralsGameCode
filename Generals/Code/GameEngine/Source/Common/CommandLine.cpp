@@ -805,6 +805,25 @@ Int parseShellMap(char *args[], int num)
 	return 2;
 }
 
+// `-screenshot <path>` — arm a one-shot main-menu screenshot to <path> and
+// skip the EA logo + Sizzle intros so we reach the main menu immediately.
+// The actual capture happens in GameClient::update once the shell is
+// active; the path travels there via TheGlobalData->m_screenshotPath.
+Int parseScreenshot(char *args[], int num)
+{
+	if (num > 1)
+	{
+		TheWritableGlobalData->m_screenshotPath = args[1];
+		TheWritableGlobalData->m_screenshotCountdownFrames = 90;
+		// Piggyback on -nologo's flag trio so the intro is skipped.
+		TheWritableGlobalData->m_playIntro  = FALSE;
+		TheWritableGlobalData->m_afterIntro = TRUE;
+		TheWritableGlobalData->m_playSizzle = FALSE;
+		return 2;
+	}
+	return 1;
+}
+
 Int parseNoWindowAnimation(char *args[], int num)
 {
 	TheWritableGlobalData->m_animateWindows = FALSE;
@@ -1161,6 +1180,7 @@ static CommandLineParam paramsForStartup[] =
 static CommandLineParam paramsForEngineInit[] =
 {
 	{ "-nologo", parseNoLogo }, // TheSuperHackers @tweak Is now available in Release builds.
+	{ "-screenshot", parseScreenshot },
 	{ "-noshellmap", parseNoShellMap },
 	{ "-noShellAnim", parseNoWindowAnimation }, // TheSuperHackers @tweak Is now available in Release builds.
 	{ "-xres", parseXRes },

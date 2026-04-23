@@ -269,7 +269,21 @@ void StdLocalFileSystem::getFileListInDirectory(const AsciiString& currentDirect
 			std::string filenameStr = iter->path().filename().string();
 			if(iter->is_directory() &&
 				(strcmp(filenameStr.c_str(), ".") != 0 && strcmp(filenameStr.c_str(), "..") != 0)) {
-				AsciiString tempsearchstr(filenameStr.c_str());
+				// TheSuperHackers @bugfix danielw 2026-04-23 Previously this
+				// passed only the subdirectory's leaf name to the recursive
+				// call, so recursion always re-scanned `originalDirectory +
+				// <leaf>` instead of descending. The effect on macOS was that
+				// `Maps/ShellMap1/ShellMap1.map` never registered in MapCache,
+				// so the ZH shell map never loaded and `TheShell->push
+				// ("Menus/MainMenu.wnd")` was never reached. Build the full
+				// relative path instead.
+				AsciiString tempsearchstr = currentDirectory;
+				if (!tempsearchstr.isEmpty()
+					&& !tempsearchstr.endsWith("/")
+					&& !tempsearchstr.endsWith("\\")) {
+					tempsearchstr.concat('/');
+				}
+				tempsearchstr.concat(filenameStr.c_str());
 
 				// recursively add files in subdirectories if required.
 				getFileListInDirectory(tempsearchstr, originalDirectory, searchName, filenameList, searchSubdirectories);

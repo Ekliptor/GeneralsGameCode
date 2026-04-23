@@ -7,9 +7,11 @@ add_library(corei_bgfx STATIC
     Common/BgfxBackend.cpp
     Common/BgfxBootstrap.cpp
     Common/BgfxTextureCache.cpp
+    Common/BgfxScreenshotCallback.cpp
     ${CMAKE_SOURCE_DIR}/Core/GameEngineDevice/Include/BGFXDevice/Common/BgfxBackend.h
     ${CMAKE_SOURCE_DIR}/Core/GameEngineDevice/Include/BGFXDevice/Common/BgfxBootstrap.h
     ${CMAKE_SOURCE_DIR}/Core/GameEngineDevice/Include/BGFXDevice/Common/BgfxTextureCache.h
+    ${CMAKE_SOURCE_DIR}/Core/GameEngineDevice/Include/BGFXDevice/Common/BgfxScreenshotCallback.h
 )
 
 if(APPLE)
@@ -40,6 +42,7 @@ target_link_libraries(corei_bgfx PUBLIC
     bimg          # Phase 5j: core image containers + format tables.
     bimg_decode   # Phase 5j: DDS / KTX / PNG / TGA decoding via bimg::imageParse.
     corei_always_no_pch
+    core_wwlib    # Targa writer for BgfxScreenshotCallback::screenShot().
 )
 
 # Phase 5i — BgfxBootstrap queries SDL_GetWindowSizeInPixels so it can pass

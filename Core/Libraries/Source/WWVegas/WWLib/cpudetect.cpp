@@ -32,6 +32,13 @@
 # include <time.h>  // for time(), localtime() and timezone variable.
 #endif
 
+#if defined(__APPLE__) || defined(__FreeBSD__)
+#include <sys/sysctl.h>
+#endif
+#if defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__)
+#include <unistd.h>
+#endif
+
 struct OSInfoStruct {
 	const char* Code;
 	const char* SubCode;
@@ -919,7 +926,31 @@ void CPUDetectClass::Init_Memory()
 #endif // defined(_MSC_VER) && _MSC_VER < 1300
 
 #else
-#warning FIX Init_Memory()
+	// TheSuperHackers @bugfix danielw 2026-04-23 Previously a stub on non-Win32,
+	// which left TotalPhysicalMemory=0. GameLOD's m_memPassed check (needs
+	// >=256MB) then failed and force-disabled m_shellMapOn (GameLOD.cpp:621),
+	// which in turn made the Zero Hour shell map 3D background not render —
+	// so the ZH main menu rendered against its static fallback image (which
+	// lives only in vanilla Textures.big) and looked like the vanilla menu.
+#if defined(__APPLE__) || defined(__FreeBSD__)
+	uint64_t physMem = 0;
+	size_t physMemSize = sizeof(physMem);
+	if (sysctlbyname("hw.memsize", &physMem, &physMemSize, nullptr, 0) == 0)
+	{
+		TotalPhysicalMemory     = physMem;
+		AvailablePhysicalMemory = physMem;
+	}
+#elif defined(__linux__)
+	long pages     = sysconf(_SC_PHYS_PAGES);
+	long pageSize  = sysconf(_SC_PAGE_SIZE);
+	long availPgs  = sysconf(_SC_AVPHYS_PAGES);
+	if (pages > 0 && pageSize > 0)
+	{
+		TotalPhysicalMemory     = (uint64_t)pages * (uint64_t)pageSize;
+		AvailablePhysicalMemory = (availPgs > 0 ? (uint64_t)availPgs : (uint64_t)pages) * (uint64_t)pageSize;
+	}
+#endif
+	// TotalPageMemory / TotalVirtualMemory left at 0 — no callers rely on them.
 #endif // WIN32
 }
 

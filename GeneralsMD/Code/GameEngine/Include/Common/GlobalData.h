@@ -365,6 +365,8 @@ public:
 	Bool m_playIntro;									///< Flag to say if we're to play the intro or not
 	Bool m_playSizzle;								///< Flag to say whether we play the sizzle movie after the logo movie.
 	Bool m_afterIntro;								///< we need to tell the game our intro is done
+	AsciiString m_screenshotPath;			///< -screenshot <path>: when non-empty, GameClient captures one TGA to this path then quits
+	Int m_screenshotCountdownFrames;	///< frames to wait after the shell becomes active before taking the screenshot
 	Bool m_allowExitOutOfMovies;			///< flag to allow exit out of movies only after the Intro has played
 
 	Bool m_loadScreenRender;						///< flag to disallow rendering of almost everything during a loadscreen

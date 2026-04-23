@@ -160,6 +160,15 @@ public:
 	                                   void* pixels,
 	                                   uint32_t byteCapacity) = 0;
 
+	// Asynchronous backbuffer screenshot. The backend queues a request and
+	// writes the image to `path` inside the next frame's GPU→CPU drain
+	// (bgfx uses its CallbackI::screenShot for this). Returns false if the
+	// backend can't honour the request (not initialized, null path, or no
+	// backbuffer capture path). DX8 impls can leave this as the default
+	// no-op stub — the W3DDisplay DX8 path captures via surface lock
+	// directly.
+	virtual bool Request_Back_Buffer_Screenshot(const char* /*path*/) { return false; }
+
 	// Phase 5m — fire-and-forget per-frame draw. `verts` + `indices` are
 	// copied into backend-owned transient buffers that live for the current
 	// frame only; no handle is returned. `indices == nullptr` + `indexCount

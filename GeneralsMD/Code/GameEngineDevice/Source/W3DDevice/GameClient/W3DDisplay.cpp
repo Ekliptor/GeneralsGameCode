@@ -105,10 +105,13 @@ static void drawFramerateBar();
 #include "WW3D2/meshmdl.h"
 #include "WW3D2/rddesc.h"
 #include "TARGA.h"
+#include "WW3D2/IRenderBackend.h"
+#include "WW3D2/RenderBackendRuntime.h"
 
 #ifndef RTS_RENDERER_DX8
 #include "BGFXDevice/Common/BgfxTextureCache.h"
 #include "Common/File.h"
+#include "Common/Registry.h"
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -133,6 +136,14 @@ namespace {
 // "titlescreenuserinterface.tga", which come from TextureClass::Get_Full_Path
 // without a directory prefix) get Art\Textures\ prepended, mirroring the
 // implicit prefix that GameFileClass::Set_Name applies on the W3D path.
+//
+// TheSuperHackers @fix danielw 2026-04-23 Probe the localized
+// Data\<Language>\Art\Textures\<filename> path FIRST, so Zero Hour UI
+// textures packed under data\english\art\textures\ in EnglishZH.big win
+// over the vanilla-Generals ones at art\textures\ in Textures.big. Without
+// this, the ZH main menu showed the vanilla "GENERALS" logo because
+// SCSmShellUserInterface512_001.tga resolved to the vanilla archive.
+// Mirrors GameFileClass::Set_Name in W3DFileSystem.cpp for the DX8 path.
 // Falls back to stdio for absolute / dev paths that don't live in an archive.
 bool readViaFS(const char* path, std::vector<uint8_t>& out)
 {
@@ -150,6 +161,13 @@ bool readViaFS(const char* path, std::vector<uint8_t>& out)
 	if (TheFileSystem) {
 		const bool hasSep = std::strchr(path, '/') || std::strchr(path, '\\');
 		if (!hasSep) {
+			AsciiString lang = GetRegistryLanguage();
+			if (!lang.isEmpty()) {
+				std::string localized;
+				localized.reserve(std::strlen(path) + 32 + lang.getLength());
+				localized.append("Data\\").append(lang.str()).append("\\Art\\Textures\\").append(path);
+				if (readFile(localized.c_str(), out)) return true;
+			}
 			std::string prefixed;
 			prefixed.reserve(std::strlen(path) + 13);
 			prefixed.append("Art\\Textures\\").append(path);
@@ -3231,6 +3249,33 @@ void W3DDisplay::takeScreenShot()
 	ufileName.translate(leafname);
 	TheInGameUI->message(TheGameText->fetch("GUI:ScreenCapture"), ufileName.str());
 #endif // _WIN32
+}
+
+/** Save a one-shot screenshot to the caller-supplied absolute path (TGA).
+  * Invoked by the `-screenshot <path>` CLI flag after the shell menu has
+  * rendered. Unlike takeScreenShot() this does NOT show an in-game UI
+  * message and does NOT auto-number the filename. */
+void W3DDisplay::takeScreenShotToPath( const char* path )
+{
+	if (path == nullptr || *path == '\0')
+		return;
+
+	// BGFX path (macOS, Linux, and any Windows build with RTS_RENDERER_DX8
+	// not defined): the active IRenderBackend queues an async request to
+	// bgfx, which writes TGA via our BgfxScreenshotCallback during the next
+	// bgfx::frame() call. Nothing to do here after the request.
+	if (IRenderBackend* backend = RenderBackendRuntime::Get_Active())
+	{
+		backend->Request_Back_Buffer_Screenshot(path);
+		return;
+	}
+
+#ifdef _WIN32
+	// DX8 path (Windows). TODO(bonus): route through the same surface-copy +
+	// Targa::Save logic as takeScreenShot(), but writing to `path` instead of
+	// the auto-numbered filename. Keeping the stub for now so the Windows
+	// build still links; the macOS requirement is the primary target.
+#endif
 }
 
 /** Start/Stop capturing an AVI movie*/

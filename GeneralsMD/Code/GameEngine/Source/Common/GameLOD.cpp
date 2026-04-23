@@ -618,7 +618,13 @@ void GameLODManager::applyStaticLODLevel(StaticGameLODLevel level)
 		TheWritableGlobalData->m_useFpsLimit = lodInfo->m_useFpsLimit;
 		TheWritableGlobalData->m_useTrees = requestedTrees;
 
-		if (!m_memPassed || isReallyLowMHz()) {
+		// TheSuperHackers @fix danielw 2026-04-23 Treat m_cpuFreq==0 (i.e. CPU
+		// speed could not be measured — e.g. RDTSC unavailable on non-x86 such
+		// as Apple Silicon) as "unknown, do not gate". Otherwise isReallyLowMHz()
+		// returns TRUE for any ARM/non-x86 host and force-disables m_shellMapOn,
+		// which made the ZH main menu fall back to BlankWindow.wnd + vanilla
+		// backdrop instead of the 3D shell map scene.
+		if (!m_memPassed || (m_cpuFreq > 0 && isReallyLowMHz())) {
 			TheWritableGlobalData->m_shellMapOn = false;
 		}
 	}

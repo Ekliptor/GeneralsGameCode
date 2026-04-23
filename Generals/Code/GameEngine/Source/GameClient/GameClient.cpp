@@ -558,6 +558,31 @@ void GameClient::update()
 		}
 	}
 
+	// `-screenshot <path>`: once the intro is finished and the shell menu
+	// is live, count down a few frames so the UI has settled, then take a
+	// one-shot screenshot and request a clean exit. `bgfx::requestScreenShot`
+	// is asynchronous — the TGA is written during the next bgfx::frame()
+	// call, which happens inside this frame's later TheDisplay->draw() /
+	// subsequent engine update, before m_quitting causes the main loop to
+	// break out.
+	if (!TheGlobalData->m_screenshotPath.isEmpty()
+		&& !TheGlobalData->m_afterIntro
+		&& TheShell && TheShell->isShellActive()
+		&& TheDisplay && !TheDisplay->isMoviePlaying())
+	{
+		if (TheWritableGlobalData->m_screenshotCountdownFrames > 0)
+		{
+			TheWritableGlobalData->m_screenshotCountdownFrames--;
+		}
+		else
+		{
+			TheDisplay->takeScreenShotToPath(TheGlobalData->m_screenshotPath.str());
+			TheWritableGlobalData->m_screenshotPath.clear();
+			if (TheGameEngine)
+				TheGameEngine->setQuitting(TRUE);
+		}
+	}
+
 	// update animation 2d collection
 	TheAnim2DCollection->UPDATE();
 

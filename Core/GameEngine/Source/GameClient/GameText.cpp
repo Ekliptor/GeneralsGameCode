@@ -942,28 +942,31 @@ Bool GameTextManager::parseCSF( const Char *filename )
 
 		 	file->read ( &len, sizeof ( Int ) );
 
+			// TheSuperHackers @fix danielw 2026-04-23 CSF stores UCS-2 on
+			// disk (2 bytes per char), but WideChar == wchar_t is 4 bytes
+			// on macOS/Linux. Read into a fixed 16-bit staging buffer, invert,
+			// then widen into m_tbuffer. Previously we read len*sizeof(WideChar)
+			// which consumed 2x too many bytes on non-Windows hosts and
+			// desynced every subsequent CSF record.
 			if ( len )
 			{
-				file->read ( m_tbuffer, len*sizeof(WideChar) );
+				static uint16_t s_diskBuf[MAX_UITEXT_LENGTH*2];
+				const Int bytesToRead = len * 2;
+				file->read ( s_diskBuf, bytesToRead );
+				if ( num == 0 )
+				{
+					for ( Int k = 0; k < len; ++k )
+					{
+						const uint16_t raw = s_diskBuf[k];
+						m_tbuffer[k] = static_cast<WideChar>(static_cast<uint16_t>(~raw));
+					}
+				}
 			}
 
 			if ( num == 0 )
 			{
 				// only use the first string found
 				m_tbuffer[len] = 0;
-
-				{
-					WideChar *ptr;
-
-					ptr = m_tbuffer;
-
-					while ( *ptr )
-					{
-						*ptr = ~*ptr;
-						ptr++;
-					}
-				}
-
 				stripSpaces ( m_tbuffer );
 				m_stringInfo[listCount].text = m_tbuffer;
 			}

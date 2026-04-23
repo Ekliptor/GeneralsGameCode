@@ -57,16 +57,26 @@ void Win32BIGFileSystem::init() {
 		return;
 	}
 
-	loadBigFilesFromDirectory("", "*.big");
-
 #if RTS_ZEROHOUR
-    // load original Generals assets
-    AsciiString installPath;
-    GetStringFromGeneralsRegistry("", "InstallPath", installPath );
-    //@todo this will need to be ramped up to a crash for release
-    DEBUG_ASSERTCRASH(!installPath.isEmpty(), ("Be 1337! Go install Generals!"));
-    if (!installPath.isEmpty())
-      loadBigFilesFromDirectory(installPath, "*.big");
+	// TheSuperHackers @fix danielw 2026-04-23 Load vanilla Generals archives
+	// first, then Zero Hour archives with overwrite=TRUE so ZH entries win
+	// lookups for same-named files (WindowZH.big's mainmenu.wnd overrides
+	// Window.big's, EnglishZH.big's generals.csf overrides English.big's,
+	// etc.). Previously both passes used the default overwrite=FALSE, which
+	// leaves whichever archive was loaded first at the front of each
+	// multimap bucket — and on macOS (cwd has only ZH BIGs + InstallPath
+	// points at a separate vanilla dir) that ordering was not reliably
+	// yielding the ZH menu.
+	AsciiString installPath;
+	GetStringFromGeneralsRegistry("", "InstallPath", installPath );
+	//@todo this will need to be ramped up to a crash for release
+	DEBUG_ASSERTCRASH(!installPath.isEmpty(), ("Be 1337! Go install Generals!"));
+	if (!installPath.isEmpty())
+		loadBigFilesFromDirectory(installPath, "*.big");
+
+	loadBigFilesFromDirectory("", "*.big", TRUE);
+#else
+	loadBigFilesFromDirectory("", "*.big");
 #endif
 }
 

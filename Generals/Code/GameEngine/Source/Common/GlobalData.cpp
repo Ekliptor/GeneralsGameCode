@@ -1001,6 +1001,8 @@ GlobalData::GlobalData()
 	m_playIntro = TRUE;
 	m_playSizzle = TRUE;
 	m_afterIntro = FALSE;
+	m_screenshotPath.clear();
+	m_screenshotCountdownFrames = 0;
 	m_allowExitOutOfMovies = FALSE;
 	m_loadScreenRender = FALSE;
 

@@ -518,13 +518,24 @@ void GameClient::update()
 	// We need to show the movie first.
 	if(TheGlobalData->m_playIntro && !TheDisplay->isMoviePlaying())
 	{
-		if(TheGameLODManager && TheGameLODManager->didMemPass())
-			TheDisplay->playLogoMovie("EALogoMovie", 5000, 3000);
+		// Test-only: `ZH_SKIP_INTRO=1` skips the EA logo + Sizzle movies so
+		// the shell reaches the main menu immediately. Intended for probing
+		// the main menu without waiting ~78s for the Sizzle movie to finish.
+		if (std::getenv("ZH_SKIP_INTRO")) {
+			TheWritableGlobalData->m_playIntro = FALSE;
+			TheWritableGlobalData->m_afterIntro = TRUE;
+			playSizzle = FALSE;
+		}
 		else
-			TheDisplay->playLogoMovie("EALogoMovie640", 5000, 3000);
-		TheWritableGlobalData->m_playIntro = FALSE;
-		TheWritableGlobalData->m_afterIntro = TRUE;
-		playSizzle = TRUE;
+		{
+			if(TheGameLODManager && TheGameLODManager->didMemPass())
+				TheDisplay->playLogoMovie("EALogoMovie", 5000, 3000);
+			else
+				TheDisplay->playLogoMovie("EALogoMovie640", 5000, 3000);
+			TheWritableGlobalData->m_playIntro = FALSE;
+			TheWritableGlobalData->m_afterIntro = TRUE;
+			playSizzle = TRUE;
+		}
 	}
 
 	//Initial Game Condition.  We must show the movie first and then we can display the shell
@@ -576,6 +587,31 @@ void GameClient::update()
 			TheShell->showShellMap(TRUE);
 			TheShell->showShell();
 			TheWritableGlobalData->m_afterIntro = FALSE;
+		}
+	}
+
+	// `-screenshot <path>`: once the intro is finished and the shell menu
+	// is live, count down a few frames so the UI has settled, then take a
+	// one-shot screenshot and request a clean exit. `bgfx::requestScreenShot`
+	// is asynchronous — the TGA is written during the next bgfx::frame()
+	// call, which happens inside this frame's later TheDisplay->draw() /
+	// subsequent engine update, before m_quitting causes the main loop to
+	// break out.
+	if (!TheGlobalData->m_screenshotPath.isEmpty()
+		&& !TheGlobalData->m_afterIntro
+		&& TheShell && TheShell->isShellActive()
+		&& TheDisplay && !TheDisplay->isMoviePlaying())
+	{
+		if (TheWritableGlobalData->m_screenshotCountdownFrames > 0)
+		{
+			TheWritableGlobalData->m_screenshotCountdownFrames--;
+		}
+		else
+		{
+			TheDisplay->takeScreenShotToPath(TheGlobalData->m_screenshotPath.str());
+			TheWritableGlobalData->m_screenshotPath.clear();
+			if (TheGameEngine)
+				TheGameEngine->setQuitting(TRUE);
 		}
 	}
 

@@ -78,6 +78,7 @@ public:
 	void Set_Render_Target(uintptr_t handle) override;
 	uintptr_t Get_Render_Target_Texture(uintptr_t handle) override;
 	bool Capture_Render_Target(uintptr_t handle, void* pixels, uint32_t byteCapacity) override;
+	bool Request_Back_Buffer_Screenshot(const char* path) override;
 
 	const char* Backend_Name() const override { return "bgfx"; }
 

@@ -18,6 +18,7 @@
 
 #include <Utility/CppMacros.h>
 #include "BGFXDevice/Common/BgfxBackend.h"
+#include "BGFXDevice/Common/BgfxScreenshotCallback.h"
 #if defined(__APPLE__)
 #include "BGFXDevice/Common/BgfxMacOSLayer.h"
 // Cached NSWindow handle so End_Scene can re-probe the layer at render
@@ -139,12 +140,19 @@ bool BgfxBackend::Init(void* windowHandle, int width, int height, bool windowed)
 	// spawn its own render thread.
 	bgfx::renderFrame();
 
+	// Register a minimal CallbackI whose `screenShot` handler writes TGA to
+	// disk. The shared instance lives for the lifetime of the process —
+	// bgfx holds the pointer across the render thread and calls into it
+	// during bgfx::frame().
+	static BgfxScreenshotCallback s_screenshotCallback;
+
 	bgfx::Init init;
 	init.type = bgfx::RendererType::Count; // auto-detect
 	init.resolution.width = static_cast<uint32_t>(width);
 	init.resolution.height = static_cast<uint32_t>(height);
 	init.resolution.reset = windowed ? BGFX_RESET_NONE : BGFX_RESET_FULLSCREEN;
 	init.platformData.nwh = windowHandle;
+	init.callback = &s_screenshotCallback;
 #if defined(__APPLE__)
 	init.platformData.ndt = nullptr;
 #elif defined(__linux__)
@@ -954,6 +962,21 @@ bool BgfxBackend::Capture_Render_Target(uintptr_t handle, void* pixels, uint32_t
 			return true;
 	}
 	return false;
+}
+
+bool BgfxBackend::Request_Back_Buffer_Screenshot(const char* path)
+{
+	if (!m_initialized || !path || !*path)
+		return false;
+
+	// BGFX_INVALID_HANDLE (the zero-init FrameBufferHandle sentinel) means
+	// "default backbuffer" — bgfx will deliver the pixels to our CallbackI
+	// during the next `bgfx::frame()` call after the current one has been
+	// submitted. The path we pass here is forwarded verbatim to
+	// CallbackI::screenShot(_filePath, ...).
+	bgfx::FrameBufferHandle backbuffer = BGFX_INVALID_HANDLE;
+	bgfx::requestScreenShot(backbuffer, path);
+	return true;
 }
 
 void BgfxBackend::Set_Vertex_Buffer(const void* data,
