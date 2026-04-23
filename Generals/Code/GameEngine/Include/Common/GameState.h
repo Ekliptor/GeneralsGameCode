@@ -36,6 +36,12 @@
 #include "Common/UnicodeString.h"
 #include "GameNetwork/NetworkDefs.h"
 
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include "osdep.h"
+#endif
+
 // FORWARD REFERENCES /////////////////////////////////////////////////////////////////////////////
 class GameWindow;
 class WindowLayout;

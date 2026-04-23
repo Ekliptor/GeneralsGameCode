@@ -186,6 +186,10 @@ target_include_directories(g_gameenginedevice PUBLIC
     Include
 )
 
+target_include_directories(g_gameenginedevice PRIVATE
+    ${CMAKE_SOURCE_DIR}/Generals/Code/GameEngine/Include/Precompiled
+)
+
 set(G_GAMEENGINEDEVICE_PCH_HEADERS
     [["Utility/CppMacros.h"]] # Must be first, to be removed when abandoning VC6
     [["Common/STLTypedefs.h"]]
@@ -207,4 +211,6 @@ target_link_libraries(g_gameenginedevice PRIVATE
 target_link_libraries(g_gameenginedevice PUBLIC
     corei_gameenginedevice_public
     g_gameengine
+    g_ww3d2
+    corei_ww3d2
 )

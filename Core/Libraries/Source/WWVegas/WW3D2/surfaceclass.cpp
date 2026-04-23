@@ -1043,6 +1043,10 @@ bool ConvertPixelToRGBA8(WW3DFormat fmt, const unsigned char* sp, unsigned char*
 		dp[0] = sp[2]; dp[1] = sp[1]; dp[2] = sp[0]; dp[3] = 0xFF;
 		return true;
 
+	case WW3D_FORMAT_R8G8B8:
+		dp[0] = sp[2]; dp[1] = sp[1]; dp[2] = sp[0]; dp[3] = 0xFF;
+		return true;
+
 	case WW3D_FORMAT_A4R4G4B4:
 	case WW3D_FORMAT_X4R4G4B4:
 	{

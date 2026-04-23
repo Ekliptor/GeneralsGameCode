@@ -191,6 +191,7 @@ void setFPMode()
 	// anything as long as it is consistent, really, but this
 	// is in the (vain?) hope of any slight speed boost.
 	//
+#ifdef _WIN32
 	_fpreset();
 
 	UnsignedInt curVal = _statusfp();
@@ -200,6 +201,11 @@ void setFPMode()
 	newVal = (newVal & ~_MCW_PC) | (_PC_24   & _MCW_PC);
 
 	_controlfp(newVal, _MCW_PC | _MCW_RC);
+#else
+	// POSIX: modern macOS/Linux don't expose the x87 control word the same
+	// way; the default IEEE-754 round-to-nearest + 64-bit internal precision
+	// is what we get. Deterministic sim assumes RC_NEAR which is the default.
+#endif
 }
 
 //-------------------------------------------------------------------------------------------------

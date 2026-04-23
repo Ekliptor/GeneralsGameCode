@@ -36,9 +36,15 @@ static void drawFramerateBar();
 // SYSTEM INCLUDES ////////////////////////////////////////////////////////////
 #include <numeric>
 #include <stdlib.h>
+#ifdef _WIN32
 #include <windows.h>
 #include <io.h>
+#endif
 #include <time.h>
+
+#ifndef _WIN32
+#include "SDLDevice/Common/SDLGlobals.h"
+#endif
 
 // USER INCLUDES //////////////////////////////////////////////////////////////
 #include "Common/FramePacer.h"
@@ -719,8 +725,15 @@ void W3DDisplay::init()
 		{
 			SortingRendererClass::SetMinVertexBufferSize(1);
 		}
+#ifdef _WIN32
 		if (WW3D::Init( ApplicationHWnd ) != WW3D_ERROR_OK)
 			throw ERROR_INVALID_D3D;	//failed to initialize.  User probably doesn't have DX 8.1
+#else
+		// macOS/Linux: pull the native window pointer from SDL so bgfx has an
+		// actual surface to render into.
+		if (WW3D::Init( SDLDevice::getNativeWindowHandle() ) != WW3D_ERROR_OK)
+			throw ERROR_INVALID_D3D;
+#endif
 
 		WW3D::Set_Prelit_Mode( WW3D::PRELIT_MODE_LIGHTMAP_MULTI_PASS );
 		WW3D::Set_Collision_Box_Display_Mask(0x00);	///<set to 0xff to make collision boxes visible
@@ -738,6 +751,7 @@ void W3DDisplay::init()
 #else
 		WW3D::Set_Screen_UV_Bias( FALSE );
 #endif
+		WW3D::Set_Texture_Bitdepth(32);
 
 		setWindowed( TheGlobalData->m_windowed );
 
@@ -1671,10 +1685,12 @@ void W3DDisplay::draw()
 {
 	//USE_PERF_TIMER(W3DDisplay_draw)
 
+#ifdef _WIN32
 	extern HWND ApplicationHWnd;
 	if (ApplicationHWnd && ::IsIconic(ApplicationHWnd)) {
 		return;
 	}
+#endif
 
 	if (TheGlobalData->m_headless)
 		return;
@@ -2608,6 +2624,20 @@ void W3DDisplay::drawImage( const Image *image, Int startX, Int startY,
 
 	RectClass screen_rect(startX,startY,endX,endY);
 	RectClass uv_rect(uv->lo.x,uv->lo.y,uv->hi.x,uv->hi.y);
+	// BGFX backdrop fix: some backdrop Image objects ship with a zeroed UV
+	// region (never populated by the INI/asset loader). The DX8 path
+	// accidentally tolerated this because sampling texel (0,0) of a fully
+	// opaque backdrop texture still produced a correct-looking color. The
+	// BGFX path's SRC_ALPHA/INV_SRC_ALPHA default blend turns any alpha-0
+	// texel at (0,0) into black. Substitute a full-image UV rect so the
+	// backdrop renders the whole texture instead of a single point-sample.
+	if (uv_rect.Left == 0.0f && uv_rect.Right == 0.0f &&
+	    uv_rect.Top == 0.0f && uv_rect.Bottom == 0.0f) {
+		uv_rect.Left   = 0.0f;
+		uv_rect.Top    = 0.0f;
+		uv_rect.Right  = 1.0f;
+		uv_rect.Bottom = 1.0f;
+	}
 
 	if (m_isClippedEnabled)
 	{	//need to clip this quad to clip rectangle
@@ -2886,6 +2916,7 @@ void W3DDisplay::setShroudLevel( Int x, Int y, CellShroudStatus setting )
 
 //=============================================================================
 ///Utility function to dump data into a .BMP file
+#ifdef _WIN32
 static void CreateBMPFile(LPTSTR pszFile, char *image, Int width, Int height)
 {
 	HANDLE hf;                  // file handle
@@ -2960,6 +2991,9 @@ static void CreateBMPFile(LPTSTR pszFile, char *image, Int width, Int height)
 	// Free memory.
 	LocalFree( (HLOCAL) pbmi);
 }
+#else
+static void CreateBMPFile(const char* /*pszFile*/, char* /*image*/, Int /*width*/, Int /*height*/) { /* TODO: non-Windows BMP writer */ }
+#endif
 
 ///Save Screen Capture to a file
 void W3DDisplay::takeScreenShot()

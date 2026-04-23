@@ -39,6 +39,7 @@
 //#define ENABLE_CATEGORY_LOG
 //#define ENABLE_STRIPING
 
+#ifdef RTS_RENDERER_DX8
 #include "dx8renderer.h"
 #include "dx8wrapper.h"
 #include "dx8polygonrenderer.h"
@@ -2185,8 +2186,7 @@ void DX8MeshRendererClass::Invalidate( bool shutdown)
 	texture_category_container_lists_rigid.Delete_All();
 }
 
-
-
+#endif // RTS_RENDERER_DX8
 
 
 

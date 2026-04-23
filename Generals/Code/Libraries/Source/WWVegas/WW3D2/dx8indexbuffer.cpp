@@ -190,11 +190,22 @@ IndexBufferClass::WriteLockClass::WriteLockClass(IndexBufferClass* index_buffer_
 	switch (index_buffer->Type()) {
 	case BUFFER_TYPE_DX8:
 		DX8_Assert();
-		DX8_ErrorCode(static_cast<DX8IndexBufferClass*>(index_buffer)->Get_DX8_Index_Buffer()->Lock(
+		{
+		auto* dxIB = static_cast<DX8IndexBufferClass*>(index_buffer);
+#ifdef RTS_RENDERER_DX8
+		DX8_ErrorCode(dxIB->Get_DX8_Index_Buffer()->Lock(
 			0,
 			index_buffer->Get_Index_Count()*sizeof(WORD),
 			(unsigned char**)&indices,
 			flags));
+		if (indices == nullptr) indices = dxIB->Get_Cpu_Shadow();
+#else
+		(void)flags;
+		// bgfx mode: no real GPU index buffer — Lock writes land in the
+		// CPU shadow and Draw_Triangles_Dynamic sources from it.
+		indices = dxIB->Get_Cpu_Shadow();
+#endif
+		}
 		break;
 	case BUFFER_TYPE_SORTING:
 		indices=static_cast<SortingIndexBufferClass*>(index_buffer)->index_buffer;
@@ -216,7 +227,9 @@ IndexBufferClass::WriteLockClass::~WriteLockClass()
 	switch (index_buffer->Type()) {
 	case BUFFER_TYPE_DX8:
 		DX8_Assert();
+#ifdef RTS_RENDERER_DX8
 		DX8_ErrorCode(static_cast<DX8IndexBufferClass*>(index_buffer)->index_buffer->Unlock());
+#endif
 		break;
 	case BUFFER_TYPE_SORTING:
 		break;
@@ -241,11 +254,20 @@ IndexBufferClass::AppendLockClass::AppendLockClass(IndexBufferClass* index_buffe
 	switch (index_buffer->Type()) {
 	case BUFFER_TYPE_DX8:
 		DX8_Assert();
-		DX8_ErrorCode(static_cast<DX8IndexBufferClass*>(index_buffer)->index_buffer->Lock(
+		{
+		auto* dxIB = static_cast<DX8IndexBufferClass*>(index_buffer);
+#ifdef RTS_RENDERER_DX8
+		DX8_ErrorCode(dxIB->index_buffer->Lock(
 			start_index*sizeof(unsigned short),
 			index_range*sizeof(unsigned short),
 			(unsigned char**)&indices,
 			0));
+		if (indices == nullptr) indices = dxIB->Get_Cpu_Shadow() + start_index;
+#else
+		// bgfx mode: no real GPU index buffer; append into the CPU shadow.
+		indices = dxIB->Get_Cpu_Shadow() + start_index;
+#endif
+		}
 		break;
 	case BUFFER_TYPE_SORTING:
 		indices=static_cast<SortingIndexBufferClass*>(index_buffer)->index_buffer+start_index;
@@ -264,7 +286,9 @@ IndexBufferClass::AppendLockClass::~AppendLockClass()
 	switch (index_buffer->Type()) {
 	case BUFFER_TYPE_DX8:
 		DX8_Assert();
+#ifdef RTS_RENDERER_DX8
 		DX8_ErrorCode(static_cast<DX8IndexBufferClass*>(index_buffer)->index_buffer->Unlock());
+#endif
 		break;
 	case BUFFER_TYPE_SORTING:
 		break;
@@ -287,6 +311,7 @@ DX8IndexBufferClass::DX8IndexBufferClass(unsigned short index_count_,UsageType u
 {
 	DX8_THREAD_ASSERT();
 	WWASSERT(index_count);
+#ifdef RTS_RENDERER_DX8
 	unsigned usage_flags=
 		D3DUSAGE_WRITEONLY|
 		((usage&USAGE_DYNAMIC) ? D3DUSAGE_DYNAMIC : 0)|
@@ -299,13 +324,26 @@ DX8IndexBufferClass::DX8IndexBufferClass(unsigned short index_count_,UsageType u
 		D3DFMT_INDEX16,
 		(usage&USAGE_DYNAMIC) ? D3DPOOL_DEFAULT : D3DPOOL_MANAGED,
 		&index_buffer));
+#else
+	(void)usage;
+	// bgfx mode: no GPU IB created here — CPU shadow holds everything.
+	index_buffer = nullptr;
+#endif
+
+	// CPU shadow for bgfx-mode Lock fallback / Draw_Triangles sourcing.
+	// In DX8 mode it stays unused (Lock hands back real GPU memory).
+	m_cpuShadow = new unsigned short[index_count];
 }
 
 // ----------------------------------------------------------------------------
 
 DX8IndexBufferClass::~DX8IndexBufferClass()
 {
+#ifdef RTS_RENDERER_DX8
 	index_buffer->Release();
+#endif
+	delete[] m_cpuShadow;
+	m_cpuShadow = nullptr;
 }
 
 // ----------------------------------------------------------------------------
@@ -396,12 +434,23 @@ DynamicIBAccessClass::WriteLockClass::WriteLockClass(DynamicIBAccessClass* ib_ac
 		WWASSERT(DynamicIBAccess);
 //		WWASSERT(!dynamic_dx8_index_buffer->Engine_Refs());
 		DX8_Assert();
-		DX8_ErrorCode(
-			static_cast<DX8IndexBufferClass*>(DynamicIBAccess->IndexBuffer)->Get_DX8_Index_Buffer()->Lock(
+		{
+		auto* dxIB = static_cast<DX8IndexBufferClass*>(DynamicIBAccess->IndexBuffer);
+#ifdef RTS_RENDERER_DX8
+		DX8_ErrorCode(dxIB->Get_DX8_Index_Buffer()->Lock(
 			DynamicIBAccess->IndexBufferOffset*sizeof(WORD),
 			DynamicIBAccess->Get_Index_Count()*sizeof(WORD),
 			(unsigned char**)&Indices,
 			!DynamicIBAccess->IndexBufferOffset ? D3DLOCK_DISCARD : D3DLOCK_NOOVERWRITE));
+		if (Indices == nullptr) {
+			if (auto* shadow = dxIB->Get_Cpu_Shadow())
+				Indices = shadow + DynamicIBAccess->IndexBufferOffset;
+		}
+#else
+		if (auto* shadow = dxIB->Get_Cpu_Shadow())
+			Indices = shadow + DynamicIBAccess->IndexBufferOffset;
+#endif
+		}
 		break;
 	case BUFFER_TYPE_DYNAMIC_SORTING:
 		Indices=static_cast<SortingIndexBufferClass*>(DynamicIBAccess->IndexBuffer)->index_buffer;
@@ -419,7 +468,9 @@ DynamicIBAccessClass::WriteLockClass::~WriteLockClass()
 	switch (DynamicIBAccess->Get_Type()) {
 	case BUFFER_TYPE_DYNAMIC_DX8:
 		DX8_Assert();
+#ifdef RTS_RENDERER_DX8
 		DX8_ErrorCode(static_cast<DX8IndexBufferClass*>(DynamicIBAccess->IndexBuffer)->Get_DX8_Index_Buffer()->Unlock());
+#endif
 		break;
 	case BUFFER_TYPE_DYNAMIC_SORTING:
 		break;

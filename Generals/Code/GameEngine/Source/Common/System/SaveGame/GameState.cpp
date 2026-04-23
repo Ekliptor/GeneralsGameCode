@@ -29,6 +29,10 @@
 
 // INCLUDES ///////////////////////////////////////////////////////////////////////////////////////
 #include "PreRTS.h"
+#ifndef _WIN32
+#include <filesystem>
+#include <system_error>
+#endif
 #include "Common/file.h"
 #include "Common/FileSystem.h"
 #include "Common/GameEngine.h"
@@ -204,6 +208,7 @@ GameState::SnapshotBlock *GameState::findBlockInfoByToken( AsciiString token, Sn
 
 // TheSuperHackers @tweak Use the user's default locale instead of the system default to match Windows regional settings.
 // This allows regional formats such as Europe (English) to use 24-hour and DD/MM/YYYY formats in-game.
+#ifdef _WIN32
 UnicodeString getUnicodeDateBuffer(SYSTEMTIME timeVal)
 {
 	// setup date buffer for local region date format
@@ -268,6 +273,25 @@ UnicodeString getUnicodeTimeBuffer(SYSTEMTIME timeVal)
 	displayTimeBuffer.set(timeBuffer);
 	return displayTimeBuffer;
 }
+#else
+// Non-Windows stubs: format date/time with the C-locale. Save-game UI will
+// show plain numeric formats instead of the OS-localized long/short form,
+// but this is cosmetic and avoids requiring a full ICU/localization port.
+UnicodeString getUnicodeDateBuffer(SYSTEMTIME timeVal)
+{
+	wchar_t buf[32];
+	swprintf(buf, 32, L"%04u-%02u-%02u",
+		(unsigned)timeVal.wYear, (unsigned)timeVal.wMonth, (unsigned)timeVal.wDay);
+	UnicodeString s; s.set(buf); return s;
+}
+UnicodeString getUnicodeTimeBuffer(SYSTEMTIME timeVal)
+{
+	wchar_t buf[32];
+	swprintf(buf, 32, L"%02u:%02u",
+		(unsigned)timeVal.wHour, (unsigned)timeVal.wMinute);
+	UnicodeString s; s.set(buf); return s;
+}
+#endif
 
 
 // ------------------------------------------------------------------------------------------------
@@ -1256,6 +1280,7 @@ void GameState::iterateSaveFiles( IterateSaveFileCallback callback, void *userDa
 	if( callback == nullptr )
 		return;
 
+#ifdef _WIN32
 	// save the current directory
 	char currentDirectory[ _MAX_PATH ];
 	GetCurrentDirectory( _MAX_PATH, currentDirectory );
@@ -1316,6 +1341,28 @@ void GameState::iterateSaveFiles( IterateSaveFileCallback callback, void *userDa
 
 	// restore the current directory
 	SetCurrentDirectory( currentDirectory );
+#else
+	// POSIX/std::filesystem fallback — iterate .sav files in the save dir.
+	std::error_code ec;
+	std::filesystem::path saveDir = getSaveDirectory().str();
+	if ( std::filesystem::exists( saveDir, ec ) && !ec )
+	{
+		for ( const auto& entry : std::filesystem::directory_iterator( saveDir, ec ) )
+		{
+			if ( ec ) break;
+			if ( !entry.is_regular_file() ) continue;
+			auto& p = entry.path();
+			std::string ext = p.extension().string();
+			for ( auto& c : ext ) c = (char)tolower((unsigned char)c);
+			if ( ext == ".sav" )
+			{
+				AsciiString filename;
+				filename.set( p.filename().string().c_str() );
+				callback( filename, userData );
+			}
+		}
+	}
+#endif
 
 }
 

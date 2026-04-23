@@ -175,8 +175,12 @@ public:
 
 	IDirect3DIndexBuffer8* Get_DX8_Index_Buffer()	{ return index_buffer; }
 
+	// CPU-side shadow buffer used by the BGFX-path Lock fallback.
+	unsigned short* Get_Cpu_Shadow() { return m_cpuShadow; }
+
 private:
 	IDirect3DIndexBuffer8*	index_buffer;		// actual dx8 index buffer
+	unsigned short*			m_cpuShadow = nullptr;
 };
 
 

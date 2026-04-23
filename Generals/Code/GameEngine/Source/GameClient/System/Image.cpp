@@ -33,6 +33,11 @@
 
 #include "PreRTS.h"	// This must go first in EVERY cpp file in the GameEngine
 
+#ifndef _WIN32
+#include <filesystem>
+#include <system_error>
+#endif
+
 #define DEFINE_IMAGE_STATUS_NAMES
 #include "Lib/BaseType.h"
 #include "Common/Debug.h"
@@ -248,16 +253,23 @@ void ImageCollection::load( Int textureSize )
 	char buffer[ _MAX_PATH ];
 	INI ini;
 	// first load in the user created mapped image files if we have them.
-	WIN32_FIND_DATA findData;
 	AsciiString userDataPath;
 	if(TheGlobalData)
 	{
+#ifdef _WIN32
+		WIN32_FIND_DATA findData;
 		userDataPath.format("%sINI\\MappedImages\\*.ini",TheGlobalData->getPath_UserData().str());
 		if(FindFirstFile(userDataPath.str(), &findData) !=INVALID_HANDLE_VALUE)
 		{
 			userDataPath.format("%sINI\\MappedImages",TheGlobalData->getPath_UserData().str());
 			ini.loadDirectory(userDataPath, INI_LOAD_OVERWRITE, nullptr );
 		}
+#else
+		userDataPath.format("%sINI/MappedImages",TheGlobalData->getPath_UserData().str());
+		std::error_code ec;
+		if (std::filesystem::exists(userDataPath.str(), ec) && !ec)
+			ini.loadDirectory(userDataPath, INI_LOAD_OVERWRITE, nullptr );
+#endif
 	}
 
 	// construct path to the mapped images folder of the correct texture size

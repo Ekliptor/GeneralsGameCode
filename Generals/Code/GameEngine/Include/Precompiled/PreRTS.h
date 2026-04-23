@@ -43,22 +43,32 @@ class STLSpecialAlloc;
 // Phase 3: atlbase.h / atl_compat.h retired from the game precompiled header —
 // the only consumer was the embedded IE browser (CComObject<W3DWebBrowser>),
 // which has been deleted. Tools that still use MFC/ATL include their own.
+#ifdef _WIN32
 #include <windows.h>
+#endif
 
 #include <assert.h>
 #include <ctype.h>
+#ifdef _WIN32
 #include <direct.h>
 #include <excpt.h>
+#endif
 #include <float.h>
 #include <Utility/fstream_adapter.h>
+#ifdef _WIN32
 #include <imagehlp.h>
 #include <io.h>
+#endif
 #include <limits.h>
+#ifdef _WIN32
 #include <lmcons.h>
 #if defined(_MSC_VER) && _MSC_VER < 1300
 #include <mapicode.h>
 #endif
+#endif
 #include <math.h>
+#include <cstring>
+#ifdef _WIN32
 #include <memory.h>
 #include <mmsystem.h>
 #include <objbase.h>
@@ -68,24 +78,35 @@ class STLSpecialAlloc;
 #include <shlobj.h>
 #include <shlguid.h>
 #include <snmp.h>
+#endif
 #include <stdarg.h>
 #include <stddef.h>
 #include <stdlib.h>
 #include <sys/stat.h>
+#ifdef _WIN32
 #include <sys/timeb.h>
+#endif
 #include <sys/types.h>
+#ifdef _WIN32
 #include <tchar.h>
+#endif
 #include <time.h>
+#ifdef _WIN32
 #include <vfw.h>
 #include <winerror.h>
 #include <wininet.h>
 #include <winreg.h>
+#else
+#include "osdep.h"
+#endif
 
 #ifndef DIRECTINPUT_VERSION
 #	define DIRECTINPUT_VERSION	0x800
 #endif
 
+#ifdef _WIN32
 #include <dinput.h>
+#endif
 
 //------------------------------------------------------------------------------------ STL Includes
 // srj sez: no, include STLTypesdefs below, instead, thanks

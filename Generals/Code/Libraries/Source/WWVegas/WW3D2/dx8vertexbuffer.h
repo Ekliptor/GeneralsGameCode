@@ -218,6 +218,10 @@ public:
 
 	IDirect3DVertexBuffer8* Get_DX8_Vertex_Buffer() { return VertexBuffer; }
 
+	// CPU-side shadow buffer used by the BGFX-path Lock fallback.
+	// In DX8 mode it stays null and the real GPU-mapped Lock is used.
+	unsigned char* Get_Cpu_Shadow() { return m_cpuShadow; }
+
 	void Copy(const Vector3* loc, unsigned first_vertex, unsigned count);
 	void Copy(const Vector3* loc, const Vector2* uv, unsigned first_vertex, unsigned count);
 	void Copy(const Vector3* loc, const Vector3* norm, unsigned first_vertex, unsigned count);
@@ -227,6 +231,7 @@ public:
 
 protected:
 	IDirect3DVertexBuffer8*		VertexBuffer;
+	unsigned char*				m_cpuShadow = nullptr;
 
 	void Create_Vertex_Buffer(UsageType usage);
 };

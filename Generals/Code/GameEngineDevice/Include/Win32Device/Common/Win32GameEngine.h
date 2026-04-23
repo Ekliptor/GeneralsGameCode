@@ -90,13 +90,21 @@ protected:
 	UINT m_previousErrorMode;
 };
 
+#ifndef _WIN32
+#include "StdDevice/Common/StdLocalFileSystem.h"
+#endif
+
 // INLINE -----------------------------------------------------------------------------------------
 inline GameLogic *Win32GameEngine::createGameLogic() { return NEW W3DGameLogic; }
 inline GameClient *Win32GameEngine::createGameClient() { return NEW W3DGameClient; }
 inline ModuleFactory *Win32GameEngine::createModuleFactory() { return NEW W3DModuleFactory; }
 inline ThingFactory *Win32GameEngine::createThingFactory() { return NEW W3DThingFactory; }
 inline FunctionLexicon *Win32GameEngine::createFunctionLexicon() { return NEW W3DFunctionLexicon; }
+#ifdef _WIN32
 inline LocalFileSystem *Win32GameEngine::createLocalFileSystem() { return NEW Win32LocalFileSystem; }
+#else
+inline LocalFileSystem *Win32GameEngine::createLocalFileSystem() { return NEW StdLocalFileSystem; }
+#endif
 inline ArchiveFileSystem *Win32GameEngine::createArchiveFileSystem() { return NEW Win32BIGFileSystem; }
 inline ParticleSystemManager* Win32GameEngine::createParticleSystemManager(Bool dummy)
 {

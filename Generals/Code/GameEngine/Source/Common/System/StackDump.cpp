@@ -26,6 +26,25 @@
 
 #if defined(RTS_DEBUG) || defined(IG_DEBUG_STACKTRACE)
 
+#ifndef _WIN32
+// StackDump relies on DbgHelp + Win32 CONTEXT / STACKFRAME + i386 inline
+// asm. On non-Windows, provide no-op stubs that match the public API so
+// callers link. A real portable stacktrace (libunwind / backtrace(3)) is
+// deferred — crash reporting is still useful but stack frames will be
+// empty on macOS until someone ports the walker.
+#include "Lib/BaseType.h"
+AsciiString g_LastErrorDump;
+void StackDump(void (*)(const char*)) {}
+void StackDumpFromContext(DWORD, DWORD, DWORD, void (*)(const char*)) {}
+void FillStackAddresses(void**, unsigned int, unsigned int) {}
+void StackDumpFromAddresses(void**, unsigned int, void (*)(const char*)) {}
+void GetFunctionDetails(void*, char* name, char* file, unsigned int* line, unsigned int* addr) {
+    if (name) *name = '\0';
+    if (file) *file = '\0';
+    if (line) *line = 0;
+    if (addr) *addr = 0;
+}
+#else
 #pragma pack(push, 8)
 
 #include "Common/StackDump.h"
@@ -635,6 +654,7 @@ void DumpExceptionInfo( unsigned int u, EXCEPTION_POINTERS* e_info )
 
 
 #pragma pack(pop)
+#endif // _WIN32
 
 #endif
 

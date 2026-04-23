@@ -1093,6 +1093,13 @@ target_link_libraries(g_gameengine PUBLIC
     g_wwvegas
 )
 
+if(RTS_PLATFORM_LOWER STREQUAL "sdl")
+    target_link_libraries(g_gameengine PRIVATE SDL3::SDL3)
+    target_include_directories(g_gameengine PRIVATE
+        ${CMAKE_SOURCE_DIR}/Core/GameEngineDevice/Include
+    )
+endif()
+
 target_precompile_headers(g_gameengine PRIVATE
     [["Utility/CppMacros.h"]] # Must be first, to be removed when abandoning VC6
     Include/Precompiled/PreRTS.h

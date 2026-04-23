@@ -37,7 +37,42 @@
 #include "GameNetwork/NetworkDefs.h"
 #include "trim.h"
 
+#include <cstring>
 
+#ifndef _WIN32
+#ifdef __APPLE__
+#include <crt_externs.h>
+#endif
+// Reconstruct a Win32-style single-line command-line string from argv on
+// non-Windows. The original parseCommandLine() tokenizes GetCommandLineA()'s
+// output with a quote-and-space split; the tokenizer's quote-stripping only
+// kicks in when a token STARTS with a quote character, and after the first
+// token it switches to space-based splitting — so tokens 2+ keep their
+// surrounding quotes verbatim. To stay compatible we only quote args that
+// actually need it (contain a space), matching how Win32 GetCommandLineA
+// reflects the raw command line.
+static std::string GetCommandLineA()
+{
+#ifdef __APPLE__
+    int argc = *_NSGetArgc();
+    char** argv = *_NSGetArgv();
+#else
+    extern int __argc;
+    extern char** __argv;
+    int argc = __argc;
+    char** argv = __argv;
+#endif
+    std::string out;
+    for (int i = 0; i < argc; ++i) {
+        if (i > 0) out.push_back(' ');
+        const bool needsQuoting = (argv[i] == nullptr || argv[i][0] == '\0' || std::strchr(argv[i], ' ') != nullptr);
+        if (needsQuoting) out.push_back('"');
+        if (argv[i] != nullptr) out.append(argv[i]);
+        if (needsQuoting) out.push_back('"');
+    }
+    return out;
+}
+#endif
 
 
 Bool TheDebugIgnoreSyncErrors = FALSE;

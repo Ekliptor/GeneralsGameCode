@@ -77,6 +77,15 @@
  * - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
 #include "assetmgr.h"
+
+// Singleton pointer must live outside the RTS_RENDERER_DX8 guard: the BGFX
+// build's TextureBaseClass accounting methods (defined in ww3d2_bgfx_stubs.cpp)
+// call WW3DAssetManager::Get_Instance() and expect the symbol to resolve.
+// TheInstance stays nullptr in bgfx mode since nothing constructs a
+// WW3DAssetManager there; callers null-check before dereferencing.
+WW3DAssetManager *		WW3DAssetManager::TheInstance = nullptr;
+
+#ifdef RTS_RENDERER_DX8
 #include <assert.h>
 
 #include "bittype.h"
@@ -115,11 +124,6 @@
 #include "assetstatus.h"
 #include "ringobj.h"
 #include "sphereobj.h"
-
-/*
-** Static member variable which keeps track of the single instanced asset manager
-*/
-WW3DAssetManager *		WW3DAssetManager::TheInstance = nullptr;
 
 /*
 ** Static instance of the Null prototype.  This render object is special cased
@@ -1723,4 +1727,5 @@ const char * HTreeIterator::Current_Item_Name()
 	return WW3DAssetManager::Get_Instance()->HTreeManager.Get_Tree(Index)->Get_Name();
 }
 
+#endif // RTS_RENDERER_DX8
 

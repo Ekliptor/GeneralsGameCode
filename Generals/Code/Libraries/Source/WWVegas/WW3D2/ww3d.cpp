@@ -82,6 +82,25 @@
 
 
 #include "ww3d.h"
+
+// POD statics moved above the RTS_RENDERER_DX8 guard so they link in bgfx
+// mode. The inline accessors in ww3d.h (Get_Sync_Time, Get_Thumbnail_Enabled,
+// etc.) are called by TextureBaseClass methods that are un-guarded.
+unsigned int    WW3D::SyncTime          = 0;
+unsigned int    WW3D::PreviousSyncTime  = 0;
+bool            WW3D::IsInitted         = false;
+bool            WW3D::IsRendering       = false;
+int             WW3D::FrameCount        = 0;
+bool            WW3D::ThumbnailEnabled  = true;
+
+// Getters needed by TextureBaseClass::Get_Reduction. In bgfx mode nothing
+// sets these (no WW3D::Init), so textures render at full resolution.
+static int  _TextureReduction                 = 0;
+static bool _LargeTextureExtraReductionEnabled = false;
+int  WW3D::Get_Texture_Reduction()                     { return _TextureReduction; }
+bool WW3D::Is_Large_Texture_Extra_Reduction_Enabled()  { return _LargeTextureExtraReductionEnabled; }
+
+#ifdef RTS_RENDERER_DX8
 #include "rinfo.h"
 #include "assetmgr.h"
 #include "boxrobj.h"
@@ -2102,3 +2121,117 @@ void WW3D::Set_Gamma(float gamma,float bright,float contrast,bool calibrate)
 {
 	DX8Wrapper::Set_Gamma(gamma,bright,contrast,calibrate);
 }
+#endif // RTS_RENDERER_DX8
+
+#ifndef RTS_RENDERER_DX8
+// WW3D static data & method stubs for the bgfx build. bgfx owns its own
+// render pipeline; this file just provides symbols so the legacy W3D-based
+// init/render callsites link. All state getters return neutral values and
+// setters are no-ops.
+#include "ww3d.h"
+#include "shader.h"
+#include "rddesc.h"
+
+float WW3D::LogicFrameTimeMs = 0.0f;
+float WW3D::FractionalSyncMs = 0.0f;
+float WW3D::PixelCenterX = 0.0f;
+float WW3D::PixelCenterY = 0.0f;
+bool WW3D::IsCapturing = false;
+bool WW3D::IsSortingEnabled = true;
+bool WW3D::IsScreenUVBiased = false;
+bool WW3D::IsBackfaceDebugEnabled = false;
+bool WW3D::AreDecalsEnabled = false;
+float WW3D::DecalRejectionDistance = 0.0f;
+bool WW3D::AreStaticSortListsEnabled = false;
+bool WW3D::MungeSortOnLoad = false;
+bool WW3D::OverbrightModifyOnLoad = false;
+FrameGrabClass* WW3D::Movie = nullptr;
+bool WW3D::PauseRecord = false;
+bool WW3D::RecordNextFrame = false;
+VertexMaterialClass* WW3D::DefaultDebugMaterial = nullptr;
+VertexMaterialClass* WW3D::BackfaceDebugMaterial = nullptr;
+WW3D::PrelitModeEnum WW3D::PrelitMode = WW3D::PRELIT_MODE_VERTEX;
+bool WW3D::ExposePrelit = false;
+int WW3D::TextureFilter = 0;
+bool WW3D::SnapshotActivated = false;
+WW3D::MeshDrawModeEnum WW3D::MeshDrawMode = WW3D::MESH_DRAW_MODE_OLD;
+WW3D::NPatchesGapFillingModeEnum WW3D::NPatchesGapFillingMode = WW3D::NPATCHES_GAP_FILLING_DISABLED;
+unsigned WW3D::NPatchesLevel = 0;
+bool WW3D::IsTexturingEnabled = true;
+bool WW3D::IsColoringEnabled = false;
+bool WW3D::Lite = false;
+float WW3D::DefaultNativeScreenSize = 800.0f;
+StaticSortListClass* WW3D::DefaultStaticSortLists = nullptr;
+StaticSortListClass* WW3D::CurrentStaticSortLists = nullptr;
+int WW3D::LastFrameMemoryAllocations = 0;
+int WW3D::LastFrameMemoryFrees = 0;
+long WW3D::UserStat0 = 0;
+long WW3D::UserStat1 = 0;
+long WW3D::UserStat2 = 0;
+ShaderClass WW3D::DefaultDebugShader;
+ShaderClass WW3D::LightmapDebugShader;
+
+WW3DErrorType WW3D::Init(void* hwnd, char* /*defaultpal*/, bool lite)
+{
+	if (!DX8Wrapper::Init(hwnd, lite))
+		return WW3D_ERROR_INITIALIZATION_FAILED;
+	IsInitted = true;
+	return WW3D_ERROR_OK;
+}
+WW3DErrorType WW3D::Shutdown() { IsInitted = false; return WW3D_ERROR_OK; }
+WW3DErrorType WW3D::Begin_Render(bool clear, bool clearz, const Vector3& color, float dest_alpha, void(*)())
+{
+	if (!IsInitted) return WW3D_ERROR_OK;
+	IsRendering = true;
+	if (clear || clearz) {
+		int w = 0, h = 0, bits = 0; bool windowed = true;
+		DX8Wrapper::Get_Device_Resolution(w, h, bits, windowed);
+		D3DVIEWPORT8 vp = {};
+		vp.Width  = static_cast<DWORD>(w);
+		vp.Height = static_cast<DWORD>(h);
+		vp.MaxZ   = 1.0f;
+		DX8Wrapper::Set_Viewport(&vp);
+		DX8Wrapper::Clear(clear, clearz, color, dest_alpha);
+	}
+	DX8Wrapper::Begin_Scene();
+	return WW3D_ERROR_OK;
+}
+WW3DErrorType WW3D::End_Render(bool flip_frame)
+{
+	if (!IsInitted) return WW3D_ERROR_OK;
+	IsRendering = false;
+	DX8Wrapper::End_Scene(flip_frame);
+	++FrameCount;
+	return WW3D_ERROR_OK;
+}
+void WW3D::Flush(RenderInfoClass&) {}
+WW3DErrorType WW3D::Render(SceneClass*, CameraClass*, bool, bool, const Vector3&) { return WW3D_ERROR_OK; }
+WW3DErrorType WW3D::Render(RenderObjClass&, RenderInfoClass&) { return WW3D_ERROR_OK; }
+void WW3D::Sync(bool) {}
+void WW3D::Update_Logic_Frame_Time(float ms) { LogicFrameTimeMs = ms; }
+WW3DErrorType WW3D::Set_Device_Resolution(int width, int height, int bits, int windowed, bool resize_window)
+{
+	return DX8Wrapper::Set_Device_Resolution(width, height, bits, windowed, resize_window)
+		? WW3D_ERROR_OK
+		: WW3D_ERROR_INITIALIZATION_FAILED;
+}
+WW3DErrorType WW3D::Set_Render_Device(int dev, int width, int height, int bits, int windowed, bool resize_window, bool reset_device, bool restore_assets)
+{
+	return DX8Wrapper::Set_Render_Device(dev, width, height, bits, windowed, resize_window, reset_device, restore_assets)
+		? WW3D_ERROR_OK
+		: WW3D_ERROR_INITIALIZATION_FAILED;
+}
+void WW3D::Get_Device_Resolution(int& w, int& h, int& bits, bool& windowed) { w = h = bits = 0; windowed = true; }
+void WW3D::Get_Render_Target_Resolution(int& w, int& h, int& bits, bool& windowed) { w = h = bits = 0; windowed = true; }
+const RenderDeviceDescClass& WW3D::Get_Render_Device_Desc(int) { static RenderDeviceDescClass d; return d; }
+int  WW3D::Get_Texture_Bitdepth() { return 32; }
+void WW3D::Set_Texture_Bitdepth(int) {}
+void WW3D::Set_Texture_Reduction(int, int) {}
+void WW3D::Set_MSAA_Mode(MultiSampleModeEnum) {}
+void WW3D::Set_Collision_Box_Display_Mask(int) {}
+void WW3D::Enable_Texturing(bool b) { IsTexturingEnabled = b; }
+void WW3D::Enable_Coloring(unsigned int c) { IsColoringEnabled = (c != 0); }
+void WW3D::Add_To_Static_Sort_List(RenderObjClass*, unsigned int) {}
+void WW3D::Render_And_Clear_Static_Sort_Lists(RenderInfoClass&) {}
+void WW3D::Toggle_Movie_Capture(const char*, float) {}
+#endif // !RTS_RENDERER_DX8

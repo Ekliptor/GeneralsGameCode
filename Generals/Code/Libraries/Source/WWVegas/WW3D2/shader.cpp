@@ -41,6 +41,7 @@
  * - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
 #include "shader.h"
+#ifdef RTS_RENDERER_DX8
 #include "w3d_file.h"
 #include "wwdebug.h"
 #include "dx8wrapper.h"
@@ -1047,4 +1048,46 @@ const StringClass& ShaderClass::Get_Description(StringClass& str) const
 	}
 	return str;
 }
+#endif // RTS_RENDERER_DX8
+
+#ifndef RTS_RENDERER_DX8
+// Link-time stubs for the bgfx build. ShaderClass constructors are inline in
+// shader.h so the static-member definitions here compile without the DX8
+// backend. Methods that touch D3D state machinery are provided as no-ops so
+// unreachable callers link cleanly; bgfx has its own shader pipeline.
+#include "w3d_file.h"
+
+bool ShaderClass::ShaderDirty = true;
+unsigned long ShaderClass::CurrentShader = 0;
+
+ShaderClass ShaderClass::_PresetOpaqueShader                  = ShaderClass();
+ShaderClass ShaderClass::_PresetAdditiveShader                = ShaderClass();
+ShaderClass ShaderClass::_PresetBumpenvmapShader              = ShaderClass();
+ShaderClass ShaderClass::_PresetAlphaShader                   = ShaderClass();
+ShaderClass ShaderClass::_PresetMultiplicativeShader          = ShaderClass();
+ShaderClass ShaderClass::_PresetOpaque2DShader                = ShaderClass();
+ShaderClass ShaderClass::_PresetOpaqueSpriteShader            = ShaderClass();
+ShaderClass ShaderClass::_PresetAdditive2DShader              = ShaderClass();
+ShaderClass ShaderClass::_PresetAlpha2DShader                 = ShaderClass();
+ShaderClass ShaderClass::_PresetAdditiveSpriteShader          = ShaderClass();
+ShaderClass ShaderClass::_PresetAlphaSpriteShader             = ShaderClass();
+ShaderClass ShaderClass::_PresetOpaqueSolidShader             = ShaderClass();
+ShaderClass ShaderClass::_PresetAdditiveSolidShader           = ShaderClass();
+ShaderClass ShaderClass::_PresetAlphaSolidShader              = ShaderClass();
+ShaderClass ShaderClass::_PresetATest2DShader                 = ShaderClass();
+ShaderClass ShaderClass::_PresetATestSpriteShader             = ShaderClass();
+ShaderClass ShaderClass::_PresetATestBlend2DShader            = ShaderClass();
+ShaderClass ShaderClass::_PresetATestBlendSpriteShader        = ShaderClass();
+ShaderClass ShaderClass::_PresetScreen2DShader                = ShaderClass();
+ShaderClass ShaderClass::_PresetScreenSpriteShader            = ShaderClass();
+ShaderClass ShaderClass::_PresetMultiplicative2DShader        = ShaderClass();
+ShaderClass ShaderClass::_PresetMultiplicativeSpriteShader    = ShaderClass();
+
+void ShaderClass::Enable_Fog(const char* /*source*/) {}
+ShaderClass::StaticSortCategoryType ShaderClass::Get_SS_Category() const { return (StaticSortCategoryType)0; }
+int  ShaderClass::Guess_Sort_Level() const { return 0; }
+void ShaderClass::Init_From_Material3(const W3dMaterial3Struct& /*m*/) {}
+void ShaderClass::Invert_Backface_Culling(bool /*invert*/) {}
+bool ShaderClass::Is_Backface_Culling_Inverted() { return false; }
+#endif // !RTS_RENDERER_DX8
 

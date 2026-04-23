@@ -75,7 +75,10 @@ const char *gAppPrefix = "";
 
 namespace
 {
-	enum { DEFAULT_DISPLAY_WIDTH = 800, DEFAULT_DISPLAY_HEIGHT = 600 };
+	// GameDefines.h defines DEFAULT_DISPLAY_WIDTH/HEIGHT as preprocessor macros,
+	// which collides with naming an enum constant the same thing. Use distinct
+	// names here.
+	enum { APP_MAIN_DEFAULT_WIDTH = 800, APP_MAIN_DEFAULT_HEIGHT = 600 };
 	bool s_appActive = true;
 
 	// Critical sections used by string/memory subsystems. Same allocation
@@ -90,7 +93,7 @@ GameEngine *CreateGameEngine()
 	return engine;
 }
 
-extern Int GameMain(int argc = 0, char *argv[] = nullptr);
+extern Int GameMain();
 
 int main(int argc, char *argv[])
 {
@@ -148,8 +151,8 @@ int main(int argc, char *argv[])
 
 			SDLDevice::TheSDLWindow = SDL_CreateWindow(
 				"Command and Conquer Generals",
-				DEFAULT_DISPLAY_WIDTH,
-				DEFAULT_DISPLAY_HEIGHT,
+				APP_MAIN_DEFAULT_WIDTH,
+				APP_MAIN_DEFAULT_HEIGHT,
 				flags);
 
 			if (!SDLDevice::TheSDLWindow)
@@ -186,7 +189,7 @@ int main(int argc, char *argv[])
 			return exitcode;
 		}
 
-		exitcode = GameMain(argc, argv);
+		exitcode = GameMain();
 
 		delete TheVersion;
 		TheVersion = nullptr;

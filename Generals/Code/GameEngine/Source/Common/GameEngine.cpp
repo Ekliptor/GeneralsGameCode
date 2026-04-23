@@ -170,8 +170,10 @@ void initSubsystem(
 }
 
 //-------------------------------------------------------------------------------------------------
+#ifdef _WIN32
 extern HINSTANCE ApplicationHInstance;  ///< our application instance
 extern CComModule _Module;
+#endif
 
 //-------------------------------------------------------------------------------------------------
 static void updateTGAtoDDS();
@@ -233,6 +235,7 @@ static void updateWindowTitle()
 
 	if (!title.isEmpty())
 	{
+#ifdef _WIN32
 		AsciiString titleA;
 		titleA.translate(title);	//get ASCII version for Win 9x
 
@@ -242,6 +245,12 @@ static void updateWindowTitle()
 			::SetWindowText(ApplicationHWnd, titleA.str());
 			::SetWindowTextW(ApplicationHWnd, title.str());
 		}
+#else
+		// On non-Windows, SDL owns the window; title is set at creation time
+		// via SDL_CreateWindow and updates could be plumbed through
+		// SDL_SetWindowTitle when/if needed.
+		(void)title;
+#endif
 	}
 }
 
@@ -253,7 +262,9 @@ GameEngine::GameEngine()
 	m_quitting = FALSE;
 	m_isActive = FALSE;
 
+#ifdef _WIN32
 	_Module.Init(nullptr, ApplicationHInstance, nullptr);
+#endif
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -292,7 +303,9 @@ GameEngine::~GameEngine()
 
 	Drawable::killStaticImages();
 
+#ifdef _WIN32
 	_Module.Term();
+#endif
 
 #ifdef PERF_TIMERS
 	PerfGather::termPerfDump();
@@ -767,7 +780,9 @@ void GameEngine::update()
 
 // Horrible reference, but we really, really need to know if we are windowed.
 extern bool DX8Wrapper_IsWindowed;
+#ifdef _WIN32
 extern HWND ApplicationHWnd;
+#endif
 
 /** -----------------------------------------------------------------------------------------------
  * The "main loop" of the game engine. It will not return until the game exits.

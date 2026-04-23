@@ -58,6 +58,11 @@
 
 #include "GameNetwork/FirewallHelper.h"
 
+#ifndef _WIN32
+#include <filesystem>
+#include <system_error>
+#endif
+
 // PUBLIC DATA ////////////////////////////////////////////////////////////////////////////////////
 GlobalData* TheWritableGlobalData = nullptr;				///< The global data singleton
 
@@ -1179,7 +1184,14 @@ void GlobalData::parseGameDataDefinition( INI* ini )
 
 	TheWritableGlobalData->m_userDataDir.clear();
 	TheWritableGlobalData->m_userDataDir = BuildUserDataPathFromIni();
+#ifdef _WIN32
 	CreateDirectory(TheWritableGlobalData->m_userDataDir.str(), nullptr);
+#else
+	{
+		std::error_code ec;
+		std::filesystem::create_directories(TheWritableGlobalData->m_userDataDir.str(), ec);
+	}
+#endif
 
 	// override INI values with user preferences
 	OptionPreferences optionPref;
@@ -1313,6 +1325,20 @@ UnsignedInt GlobalData::generateExeCRC()
 
 AsciiString GlobalData::BuildUserDataPathFromIni()
 {
+#ifndef _WIN32
+	// Non-Windows build: Win32 Shell APIs aren't available. Use the platform's
+	// per-user app-support directory.
+	AsciiString dir;
+	const char* home = std::getenv("HOME");
+	if (!home || !*home) home = ".";
+#ifdef __APPLE__
+	dir.format("%s/Library/Application Support/Command and Conquer Generals/", home);
+#else
+	dir.format("%s/.generals/", home);
+#endif
+	return dir;
+}
+#else
 #if defined(_MSC_VER) && (_MSC_VER < 1300)
 	// VC6 lacks FOLDERID_Documents and KF_FLAG_DEFAULT
 	const GUID FOLDERID_Documents = { 0xFDD39AD0, 0x238F, 0x46AF, 0xAD, 0xB4, 0x6C, 0x85, 0x48, 0x03, 0x69, 0xC7 };
@@ -1361,3 +1387,4 @@ AsciiString GlobalData::BuildUserDataPathFromIni()
 
 	return myDocumentsDirectory;
 }
+#endif // _WIN32

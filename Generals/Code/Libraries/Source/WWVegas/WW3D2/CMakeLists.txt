@@ -231,6 +231,19 @@ set_target_properties(g_ww3d2 PROPERTIES OUTPUT_NAME ww3d2)
 
 target_sources(g_ww3d2 PRIVATE ${WW3D2_SRC})
 
+# BGFX link stubs for WW3D2 classes whose .cpp files are gated to the
+# Direct3D8 renderer. In bgfx mode the stubs emit vtables + method bodies
+# for RenderObjClass, WW3DAssetManager, HLodClass, motion-channel classes,
+# Render2DSentenceClass, TextureClass surface helpers, the DX8MeshRenderer
+# family, AudibleSoundDefinitionClass, and RegistryClass.
+if(RTS_RENDERER_LOWER STREQUAL "bgfx")
+    target_sources(g_ww3d2 PRIVATE ww3d2_bgfx_stubs.cpp)
+    target_include_directories(g_ww3d2 PRIVATE
+        ${CMAKE_SOURCE_DIR}/Core/Libraries/Source/WWVegas/WWAudio
+        ${CMAKE_SOURCE_DIR}/Core/Libraries/Source/WWVegas/WWLib
+    )
+endif()
+
 target_compile_definitions(g_ww3d2 PRIVATE
     $<$<BOOL:${IS_VS6_BUILD}>:WINVER=0x0500>
 )

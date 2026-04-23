@@ -30,6 +30,11 @@
 // INCLUDES ///////////////////////////////////////////////////////////////////////////////////////
 #include "PreRTS.h"	// This must go first in EVERY cpp file in the GameEngine
 
+#ifndef _WIN32
+#include <filesystem>
+#include <system_error>
+#endif
+
 
 #include "Lib/BaseType.h"
 #include "Common/FileSystem.h"
@@ -807,6 +812,7 @@ void copyReplay()
 	translate.translate(GetReplayFilenameFromListbox(listboxReplayFiles, selected));
 	filename.concat(translate);
 
+#ifdef _WIN32
 	char path[1024];
 	LPITEMIDLIST pidl;
 	SHGetSpecialFolderLocation(nullptr, CSIDL_DESKTOPDIRECTORY, &pidl);
@@ -824,6 +830,27 @@ void copyReplay()
 		errorStr.trim();
 		MessageBoxOk(TheGameText->fetch("GUI:Error"),errorStr, nullptr);
 	}
+#else
+	// POSIX: copy the replay to ~/Desktop (macOS) or $HOME (Linux fallback).
+	AsciiString newFilename;
+	const char* home = std::getenv("HOME");
+	if (!home || !*home) home = ".";
+#ifdef __APPLE__
+	newFilename.format("%s/Desktop/", home);
+#else
+	newFilename.format("%s/", home);
+#endif
+	newFilename.concat(translate);
+	std::error_code ec;
+	std::filesystem::copy_file(filename.str(), newFilename.str(),
+		std::filesystem::copy_options::overwrite_existing, ec);
+	if (ec)
+	{
+		UnicodeString errorStr;
+		errorStr.translate(ec.message().c_str());
+		MessageBoxOk(TheGameText->fetch("GUI:Error"),errorStr, nullptr);
+	}
+#endif
 
 }
 

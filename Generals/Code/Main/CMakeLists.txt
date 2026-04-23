@@ -16,6 +16,8 @@ else()
 endif()
 
 target_link_libraries(g_generals PRIVATE
+    core_debug
+    core_profile
     g_gameengine
     g_gameenginedevice
     gi_always

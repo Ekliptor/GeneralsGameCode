@@ -40,6 +40,11 @@
 #include "GameLogic/GameLogic.h"
 #include "GameNetwork/GameInfo.h"
 
+#ifndef _WIN32
+#include <filesystem>
+#include <system_error>
+#endif
+
 // GLOBALS ////////////////////////////////////////////////////////////////////////////////////////
 GameStateMap *TheGameStateMap = nullptr;
 
@@ -437,6 +442,7 @@ void GameStateMap::xfer( Xfer *xfer )
 // ------------------------------------------------------------------------------------------------
 void GameStateMap::clearScratchPadMaps()
 {
+#ifdef _WIN32
 
 	// remember the current directory
 	char currentDirectory[ _MAX_PATH ];
@@ -501,5 +507,21 @@ void GameStateMap::clearScratchPadMaps()
 
 	// restore our directory to the current directory
 	SetCurrentDirectory( currentDirectory );
-
+#else
+	// POSIX/std::filesystem fallback — delete scratch-pad .map files in the save dir.
+	std::error_code ec;
+	std::filesystem::path saveDir = TheGameState->getSaveDirectory().str();
+	if ( !std::filesystem::exists( saveDir, ec ) || ec )
+		return;
+	for ( const auto& entry : std::filesystem::directory_iterator( saveDir, ec ) )
+	{
+		if ( ec ) break;
+		if ( !entry.is_regular_file() ) continue;
+		auto& p = entry.path();
+		std::string ext = p.extension().string();
+		for ( auto& c : ext ) c = (char)tolower((unsigned char)c);
+		if ( ext == ".map" )
+			std::filesystem::remove( p, ec );
+	}
+#endif
 }
