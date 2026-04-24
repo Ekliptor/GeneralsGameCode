@@ -627,6 +627,18 @@ void GameLODManager::applyStaticLODLevel(StaticGameLODLevel level)
 		if (!m_memPassed || (m_cpuFreq > 0 && isReallyLowMHz())) {
 			TheWritableGlobalData->m_shellMapOn = false;
 		}
+
+#ifndef RTS_RENDERER_DX8
+		// The W3D scene → bgfx render path (SceneClass::Render +
+		// RenderObjClass mesh submission) is not yet ported. With
+		// m_shellMapOn=true the menu queues the 3D shellmap and the
+		// backbuffer renders black. Force-disable on non-DX8 builds so
+		// Shell::showShellMap takes the BlankWindow.wnd fallback path,
+		// which renders the static backdrop image via the existing
+		// W3DDisplay::drawImage UV-zero substitution. Tracked under
+		// docs/ZH-MainMenu-Bugs.md §3.2.
+		TheWritableGlobalData->m_shellMapOn = false;
+#endif
 	}
 
 	if (TheTerrainVisual)

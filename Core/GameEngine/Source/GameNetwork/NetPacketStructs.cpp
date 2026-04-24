@@ -400,7 +400,10 @@ size_t NetPacketChatCommandData::getSize(const NetCommandMsg &msg)
 
 	size_t size = 0;
 	size += sizeof(UnsignedByte);
-	size += textLength * sizeof(WideChar);
+	// 2026-04-24 wire format is 2 bytes per
+	// char (see network::writeStringWithoutNull); using sizeof(WideChar)
+	// here would over-allocate on macOS where WideChar is 4 bytes.
+	size += textLength * sizeof(uint16_t);
 	size += sizeof(Int);
 	return size;
 }
@@ -441,7 +444,9 @@ size_t NetPacketDisconnectChatCommandData::getSize(const NetCommandMsg &msg)
 
 	size_t size = 0;
 	size += sizeof(UnsignedByte);
-	size += textLength * sizeof(WideChar);
+	// 2026-04-24 wire format is 2 bytes per
+	// char — see NetPacketChatCommandData::getSize for rationale.
+	size += textLength * sizeof(uint16_t);
 	return size;
 }
 
@@ -524,7 +529,10 @@ size_t NetPacketGameCommandData::getSize(const NetCommandMsg &msg)
 			size += arg->getArgCount() * sizeof(UnsignedInt);
 			break;
 		case ARGUMENTDATATYPE_WIDECHAR:
-			size += arg->getArgCount() * sizeof(WideChar);
+			// 2026-04-24 game-message WIDECHAR
+			// args are serialized as 2 bytes each on the wire (see the writer
+			// below and the reader in NetPacket.cpp), not sizeof(WideChar).
+			size += arg->getArgCount() * sizeof(uint16_t);
 			break;
 		}
 		arg = arg->getNext();
@@ -593,7 +601,10 @@ size_t NetPacketGameCommandData::copyBytes(UnsignedByte *buffer, const NetComman
 			size += network::writePrimitive(buffer + size, arg.timestamp);
 			break;
 		case ARGUMENTDATATYPE_WIDECHAR:
-			size += network::writePrimitive(buffer + size, arg.wChar);
+			// 2026-04-24 narrow to uint16_t so
+			// writePrimitive emits exactly 2 bytes on every platform (matches
+			// the wire format used by chat-message strings).
+			size += network::writePrimitive(buffer + size, static_cast<uint16_t>(arg.wChar));
 			break;
 		}
 	}

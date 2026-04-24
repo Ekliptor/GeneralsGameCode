@@ -53,6 +53,7 @@
 #include "GameClient/Display.h"
 #include "GameClient/DisplayStringManager.h"
 #include "GameClient/Drawable.h"
+#include "GameClient/Image.h"
 #include "GameClient/DrawGroupInfo.h"
 #include "GameClient/Eva.h"
 #include "GameClient/GameWindowManager.h"
@@ -272,6 +273,27 @@ void GameClient::init()
 	// allocate and load image collection for the GUI and just load the 256x256 ones for now
 	TheMappedImageCollection = MSGNEW("GameClientSubsystem") ImageCollection;
 	TheMappedImageCollection->load( 512 );
+
+#ifndef RTS_RENDERER_DX8
+	// HiDPI/bgfx fallback: ZH ships no static main-menu backdrop because the
+	// original game expects the 3D shellmap. With m_shellMapOn=false on bgfx
+	// (see GameLOD.cpp), the menu falls back to BlankWindow.wnd which
+	// references the MainMenuBackdrop MappedImage — whose only shipped texture
+	// is vanilla's tank-battle scene (in vanilla Textures.big). Redirect it
+	// to a ZH-themed asset that IS shipped in TexturesZH.big so ZH no longer
+	// looks identical to vanilla on the bgfx port. Tracked under
+	// docs/ZH-MainMenu-Bugs.md §3.2.
+	if (Image* backdropImg = const_cast<Image*>(
+	        TheMappedImageCollection->findImageByName(AsciiString("MainMenuBackdrop")))) {
+		backdropImg->setFilename(AsciiString("ChallengeBackgroundMinSpec.dds"));
+		Region2D fullUV;
+		fullUV.lo.x = 0.0f; fullUV.lo.y = 0.0f;
+		fullUV.hi.x = 1.0f; fullUV.hi.y = 1.0f;
+		backdropImg->setUV(&fullUV);
+		ICoord2D imgSize = { 800, 600 };
+		backdropImg->setImageSize(&imgSize);
+	}
+#endif
 
 	// now that we have all the images loaded ... load any animation definitions from those images
 	TheAnim2DCollection = MSGNEW("GameClientSubsystem") Anim2DCollection;

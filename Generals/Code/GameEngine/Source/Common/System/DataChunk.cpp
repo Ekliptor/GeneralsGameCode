@@ -29,6 +29,8 @@
 #include "PreRTS.h"	// This must go first in EVERY cpp file in the GameEngine
 
 #include "stdlib.h"
+#include <cstdint>
+#include <vector>
 #include "Compression.h"
 #include "Common/DataChunk.h"
 #include "Common/file.h"
@@ -357,7 +359,18 @@ void DataChunkOutput::writeUnicodeString( UnicodeString theString )
 {
 	UnsignedShort len = theString.getLength();
 	::fwrite( (const char *)&len, sizeof(UnsignedShort) , 1, m_tmp_file );
-	::fwrite( theString.str(), len*sizeof(WideChar) , 1, m_tmp_file );
+	if (len > 0) {
+		// 2026-04-24 WideChar==wchar_t is
+		// 2 bytes on Win32 but 4 bytes on macOS. The on-disk save format is
+		// 2 bytes per char (UCS-2). Narrow into a uint16_t staging buffer
+		// before writing so saves are cross-platform compatible. Mirrors the
+		// pattern in Core/.../GameText.cpp::parseCSF (round 3.2 fix).
+		const WideChar *src = theString.str();
+		std::vector<uint16_t> diskBuf(len);
+		for (UnsignedShort i = 0; i < len; ++i)
+			diskBuf[i] = static_cast<uint16_t>(src[i]);
+		::fwrite( diskBuf.data(), sizeof(uint16_t), len, m_tmp_file );
+	}
 }
 
 void DataChunkOutput::writeNameKey( const NameKeyType key )
@@ -966,12 +979,19 @@ UnicodeString DataChunkInput::readUnicodeString()
 	DEBUG_ASSERTCRASH(m_chunkStack->dataLeft>=sizeof(UnsignedShort), ("Read past end of chunk."));
 	m_file->read( &len, sizeof(UnsignedShort) );
 	decrementDataLeft( sizeof(UnsignedShort) );
-	DEBUG_ASSERTCRASH(m_chunkStack->dataLeft>=len, ("Read past end of chunk."));
+	// 2026-04-24 disk format is 2 bytes per
+	// char regardless of platform; do not multiply by sizeof(WideChar)
+	// (4 bytes on macOS, 2 bytes on Win32). See writeUnicodeString.
+	const Int diskBytes = static_cast<Int>(len) * static_cast<Int>(sizeof(uint16_t));
+	DEBUG_ASSERTCRASH(m_chunkStack->dataLeft>=diskBytes, ("Read past end of chunk."));
 	UnicodeString theString;
 	if (len>0) {
 		WideChar *str = theString.getBufferForRead(len);
-		m_file->read( (char*)str, len*sizeof(WideChar) );
-		decrementDataLeft( len*sizeof(WideChar) );
+		std::vector<uint16_t> diskBuf(len);
+		m_file->read( diskBuf.data(), diskBytes );
+		decrementDataLeft( diskBytes );
+		for (UnsignedShort i = 0; i < len; ++i)
+			str[i] = static_cast<WideChar>(diskBuf[i]);
 		// add null delimiter to string.  Note that getBufferForRead allocates space for terminating null.
 		str[len] = '\000';
 	}

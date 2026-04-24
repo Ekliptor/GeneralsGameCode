@@ -18,6 +18,7 @@
 
 #pragma once
 
+#include <cstdint>
 #include "GameNetwork/NetworkDefs.h"
 
 class AsciiString;
@@ -82,12 +83,35 @@ inline size_t writeBytes(UnsignedByte *dest, const UnsignedByte* src, size_t len
 	return len;
 }
 
+// 2026-04-24 wire format is 2 bytes per
+// char (UCS-2), independent of WideChar/wchar_t platform width (2 on Win32,
+// 4 on macOS/Linux). Narrow into a uint16_t before memcpy on write; the
+// symmetric readStringWithoutNull below widens back. On Win32 (where
+// sizeof(WideChar)==2) the cast is a no-op, so existing Win32 wire format
+// is preserved exactly.
 inline size_t writeStringWithoutNull(UnsignedByte *dest, const UnicodeString& value, size_t maxLen)
 {
 	const size_t copyLen = std::min<size_t>(value.getLength(), maxLen);
-	const size_t copyBytes = copyLen * sizeof(WideChar);
-	memcpy(dest, value.str(), copyBytes);
-	return copyBytes;
+	const WideChar *src = value.str();
+	for (size_t i = 0; i < copyLen; ++i) {
+		const uint16_t ch = static_cast<uint16_t>(src[i]);
+		memcpy(dest + i * sizeof(uint16_t), &ch, sizeof(uint16_t));
+	}
+	return copyLen * sizeof(uint16_t);
+}
+
+// 2026-04-24 reader counterpart for
+// writeStringWithoutNull — read 2 bytes per char (UCS-2 on the wire),
+// widen into WideChar slots in `dest`. Returns the number of wire bytes
+// consumed, so callers can advance their read cursor.
+inline size_t readStringWithoutNull(WideChar *dest, const UnsignedByte *src, size_t copyLen)
+{
+	for (size_t i = 0; i < copyLen; ++i) {
+		uint16_t ch;
+		memcpy(&ch, src + i * sizeof(uint16_t), sizeof(uint16_t));
+		dest[i] = static_cast<WideChar>(ch);
+	}
+	return copyLen * sizeof(uint16_t);
 }
 
 inline size_t writeStringWithNull(UnsignedByte *dest, const AsciiString& value)

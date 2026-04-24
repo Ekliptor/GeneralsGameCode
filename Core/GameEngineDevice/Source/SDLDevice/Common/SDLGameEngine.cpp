@@ -17,13 +17,17 @@
 */
 
 #include "SDLDevice/Common/SDLGameEngine.h"
+#include "SDLDevice/Common/SDLGlobals.h"
 #include "SDLDevice/GameClient/SDLKeyboard.h"
 
 #include "Common/GameAudio.h"
+#include "Common/GameDefines.h"
 #include "GameClient/Mouse.h"
 #include "Win32Device/GameClient/Win32Mouse.h"
 
 #include <SDL3/SDL.h>
+
+#include <cmath>
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -44,6 +48,47 @@ SDLGameEngine::~SDLGameEngine() = default;
 
 namespace
 {
+	// SDL3 + SDL_WINDOW_FULLSCREEN on macOS reports mouse events in the
+	// window's logical-point coordinate space, which snaps to the display's
+	// logical size (e.g. 1440×900 on a 2880×1800 Retina display). The game's
+	// UI is hardcoded against a 800×600 design space (DEFAULT_DISPLAY_*). In
+	// windowed mode the SDL window is 800×600 logical, so the two spaces
+	// coincide and no scaling is needed. In fullscreen they diverge and every
+	// click lands off the widget regions. Scale here to bridge the gap.
+	float s_mouseScaleX = 1.0f;
+	float s_mouseScaleY = 1.0f;
+	bool  s_mouseScaleSeeded = false;
+
+	void refreshMouseScale()
+	{
+		s_mouseScaleSeeded = true;
+		if (!SDLDevice::TheSDLWindow) {
+			s_mouseScaleX = 1.0f;
+			s_mouseScaleY = 1.0f;
+			return;
+		}
+		int winW = 0, winH = 0;
+		SDL_GetWindowSize(SDLDevice::TheSDLWindow, &winW, &winH);
+		if (winW <= 0 || winH <= 0) {
+			s_mouseScaleX = 1.0f;
+			s_mouseScaleY = 1.0f;
+			return;
+		}
+		s_mouseScaleX = static_cast<float>(DEFAULT_DISPLAY_WIDTH)  / static_cast<float>(winW);
+		s_mouseScaleY = static_cast<float>(DEFAULT_DISPLAY_HEIGHT) / static_cast<float>(winH);
+	}
+
+	inline Sint32 scaleX(float x)
+	{
+		if (!s_mouseScaleSeeded) refreshMouseScale();
+		return static_cast<Sint32>(std::lround(x * s_mouseScaleX));
+	}
+	inline Sint32 scaleY(float y)
+	{
+		if (!s_mouseScaleSeeded) refreshMouseScale();
+		return static_cast<Sint32>(std::lround(y * s_mouseScaleY));
+	}
+
 	LPARAM packMousePos(Sint32 x, Sint32 y)
 	{
 		return (static_cast<LPARAM>(y & 0xFFFF) << 16) | (x & 0xFFFF);
@@ -59,7 +104,7 @@ namespace
 		{
 			case SDL_EVENT_MOUSE_MOTION:
 				msg = WM_MOUSEMOVE;
-				lParam = packMousePos(static_cast<Sint32>(e.motion.x), static_cast<Sint32>(e.motion.y));
+				lParam = packMousePos(scaleX(e.motion.x), scaleY(e.motion.y));
 				return true;
 			case SDL_EVENT_MOUSE_BUTTON_DOWN:
 			case SDL_EVENT_MOUSE_BUTTON_UP:
@@ -80,7 +125,7 @@ namespace
 					default:
 						return false;
 				}
-				lParam = packMousePos(static_cast<Sint32>(e.button.x), static_cast<Sint32>(e.button.y));
+				lParam = packMousePos(scaleX(e.button.x), scaleY(e.button.y));
 				return true;
 			}
 			case SDL_EVENT_MOUSE_WHEEL:
@@ -91,8 +136,8 @@ namespace
 				msg = 0x020A; // WM_MOUSEWHEEL literal, matches Win32Mouse::translateEvent
 				wParam = (static_cast<WPARAM>(delta & 0xFFFF) << 16);
 				float mx = 0.0f, my = 0.0f;
-				SDL_GetGlobalMouseState(&mx, &my);
-				lParam = packMousePos(static_cast<Sint32>(mx), static_cast<Sint32>(my));
+				SDL_GetMouseState(&mx, &my);
+				lParam = packMousePos(scaleX(mx), scaleY(my));
 				return true;
 			}
 			default:
@@ -124,6 +169,14 @@ void SDLGameEngine::serviceWindowsOS()
 				setIsActive(FALSE);
 				if (TheAudio)
 					TheAudio->muteAudio(AudioManager::MuteAudioReason_WindowFocus);
+				break;
+
+			case SDL_EVENT_WINDOW_RESIZED:
+			case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
+			case SDL_EVENT_WINDOW_DISPLAY_CHANGED:
+			case SDL_EVENT_WINDOW_ENTER_FULLSCREEN:
+			case SDL_EVENT_WINDOW_LEAVE_FULLSCREEN:
+				refreshMouseScale();
 				break;
 
 			case SDL_EVENT_KEY_DOWN:

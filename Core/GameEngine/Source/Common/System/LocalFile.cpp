@@ -56,6 +56,7 @@
 #include <sys/stat.h>
 #include <stdlib.h>
 #include <ctype.h>
+#include <cstdint>
 
 #include "Common/LocalFile.h"
 #include "Common/RAMFile.h"
@@ -385,7 +386,12 @@ Int LocalFile::readChar()
 
 Int LocalFile::readWideChar()
 {
-	WideChar character = L'\0';
+	// 2026-04-24 Replay/file format is UCS-2 on disk (2 bytes per code
+	// unit) regardless of the platform `WideChar` width — `wchar_t` is
+	// 2 bytes on Win32 but 4 bytes on macOS. Reading sizeof(WideChar)
+	// made replays platform-incompatible. Recorder.cpp is the only
+	// consumer of the WideChar file I/O surface.
+	uint16_t character = 0;
 
 	Int ret = read( &character, sizeof(character) );
 
@@ -444,7 +450,15 @@ Int LocalFile::writeFormat( const WideChar* format, ... )
 	Int length = vswprintf(buffer, sizeof(buffer) / sizeof(WideChar), format, args);
 	va_end(args);
 
-	return write( buffer, length * sizeof(WideChar) );
+	if (length <= 0)
+		return length;
+
+	// 2026-04-24 Narrow into UCS-2 staging so the on-disk format is
+	// identical on Win32 and macOS. See readWideChar above.
+	uint16_t diskBuf[1024];
+	for (Int i = 0; i < length; ++i)
+		diskBuf[i] = static_cast<uint16_t>(buffer[i]);
+	return write( diskBuf, length * sizeof(uint16_t) );
 }
 
 //=================================================================
@@ -466,7 +480,10 @@ Int LocalFile::writeChar( const Char* character )
 
 Int LocalFile::writeChar( const WideChar* character )
 {
-	if ( write( character, sizeof(WideChar) ) == sizeof(WideChar) ) {
+	// 2026-04-24 UCS-2 on disk (2 bytes per code unit), independent of
+	// WideChar platform width. See readWideChar above.
+	const uint16_t diskCh = static_cast<uint16_t>(*character);
+	if ( write( &diskCh, sizeof(diskCh) ) == sizeof(diskCh) ) {
 		return (Int)(uintptr_t)character;
 	}
 

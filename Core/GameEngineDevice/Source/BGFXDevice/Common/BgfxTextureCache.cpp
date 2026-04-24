@@ -92,7 +92,7 @@ uintptr_t Get_Or_Load_File(const char* path)
 		return 0;
 	}
 
-	// TheSuperHackers @bugfix danielw 2026-04-24 Vanilla Generals authored
+	// 2026-04-24 Vanilla Generals authored
 	// many 32-bit TGAs with `imageDescriptor.alphaBits = 0` even though all
 	// four channels carry data. bimg honors the descriptor literally —
 	// alphaBits=0 makes the alpha channel decode to zero, which then alpha-

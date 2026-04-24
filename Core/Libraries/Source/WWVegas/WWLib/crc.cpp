@@ -62,7 +62,10 @@ void CRCEngine::operator() (char datum)
 {
 	StagingBuffer.Buffer[Index++] = datum;
 
-	if (Index == sizeof(long))  {
+	// 2026-04-24 chunk by uint32_t (4 bytes
+	// on every platform) instead of `long` (4 on Win32, 8 on 64-bit macOS).
+	// Keeps cross-platform CRC values in agreement.
+	if (Index == sizeof(uint32_t))  {
 		CRC = Value();
 		StagingBuffer.Composite = 0;
 		Index = 0;
@@ -107,14 +110,17 @@ long CRCEngine::operator() (void const * buffer, int length)
 		}
 
 		/*
-		**	Perform the fast 'bulk' processing by reading long word sized
-		**	data blocks.
+		**	Perform the fast 'bulk' processing by reading 4-byte data blocks.
+		**	2026-04-24 use uint32_t chunking
+		**	(see the union comment in CRC.h) — original used `long`, which
+		**	is 8 bytes on 64-bit macOS and produces a different CRC value
+		**	than the Win32 4-byte path.
 		*/
-		long const * longptr = (long const *)dataptr;
-		int longcount = bytes_left / sizeof(long);		// Whole 'long' elements remaining.
+		uint32_t const * longptr = (uint32_t const *)dataptr;
+		int longcount = bytes_left / sizeof(uint32_t);	// Whole 4-byte elements remaining.
 		while (longcount--) {
 			CRC = _lrotl(CRC, 1) + *longptr++;
-			bytes_left -= sizeof(long);
+			bytes_left -= sizeof(uint32_t);
 		}
 
 		/*

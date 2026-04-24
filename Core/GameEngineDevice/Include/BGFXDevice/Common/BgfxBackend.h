@@ -102,6 +102,12 @@ public:
 	// physical/logical. A value of 0 disables scaling (1:1 mapping).
 	void Set_Logical_Resolution(int logicalW, int logicalH);
 
+	// Read the backbuffer's pixel size and the currently-configured logical
+	// resolution. Used by consumers that need to derive the display scale
+	// factor (e.g. HiDPI font rasterization).
+	void Get_Back_Buffer_Size(int& outW, int& outH) const override { outW = m_width;    outH = m_height;   }
+	void Get_Logical_Resolution(int& outW, int& outH) const override { outW = m_logicalW; outH = m_logicalH; }
+
 private:
 	bool m_initialized = false;
 	int m_width = 0;

@@ -37,6 +37,7 @@
 #pragma once
 
 #include	<stdlib.h>
+#include	<cstdint>
 
 // TheSuperHackers @build feliwir 17/04/2025 include _ltrotl macros
 #include <Utility/intrin_compat.h>
@@ -97,10 +98,16 @@ class CRCEngine {
 		**	This is the buffer that holds the incoming partial data. When the buffer
 		**	is filled, the value is transformed into the CRC and the buffer is flushed
 		**	in preparation for additional data.
+		**
+		**	2026-04-24 The staging buffer must be
+		**	exactly 4 bytes on every platform — `long` is 4 bytes on Win32 but
+		**	8 bytes on 64-bit macOS, which would split the same input into a
+		**	different number of chunks and yield a different CRC value. Use
+		**	uint32_t so the on-the-wire CRC is platform-independent.
 		*/
 		union {
-			long Composite;
-			char Buffer[sizeof(long)];
+			uint32_t Composite;
+			char     Buffer[sizeof(uint32_t)];
 		} StagingBuffer;
 };
 

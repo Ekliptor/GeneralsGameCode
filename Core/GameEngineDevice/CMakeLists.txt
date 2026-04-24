@@ -230,8 +230,10 @@ if(RTS_AUDIO_LOWER STREQUAL "miles")
     target_link_libraries(corei_gameenginedevice_public INTERFACE milesstub)
 elseif(RTS_AUDIO_LOWER STREQUAL "openal" OR RTS_AUDIO_LOWER STREQUAL "null")
     target_sources(corei_gameenginedevice_private INTERFACE
+        Include/OpenALAudioDevice/OpenALAudioFileCache.h
         Include/OpenALAudioDevice/OpenALAudioManager.h
         Include/OpenALAudioDevice/OpenALAudioStream.h
+        Source/OpenALAudioDevice/OpenALAudioFileCache.cpp
         Source/OpenALAudioDevice/OpenALAudioManager.cpp
         Source/OpenALAudioDevice/OpenALAudioStream.cpp
     )

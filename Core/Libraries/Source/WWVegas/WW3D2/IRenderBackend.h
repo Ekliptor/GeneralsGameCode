@@ -184,4 +184,12 @@ public:
 
 	// Identification (for diagnostics / golden-image testing)
 	virtual const char* Backend_Name() const = 0;
+
+	// Resolution accessors. Backbuffer size is in real pixels; logical
+	// resolution is the game's design space (typically 800×600). Default
+	// implementation returns zeros so backends without HiDPI awareness don't
+	// have to implement anything — callers must treat `{0,0}` as "unknown"
+	// and fall back to a sensible default.
+	virtual void Get_Back_Buffer_Size(int& outW, int& outH) const { outW = 0; outH = 0; }
+	virtual void Get_Logical_Resolution(int& outW, int& outH) const { outW = 0; outH = 0; }
 };

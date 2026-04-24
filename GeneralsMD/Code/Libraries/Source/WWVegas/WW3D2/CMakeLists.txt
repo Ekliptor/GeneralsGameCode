@@ -242,7 +242,12 @@ target_sources(z_ww3d2 PRIVATE ${WW3D2_SRC})
 # Render2DSentenceClass, TextureClass surface helpers, the DX8MeshRenderer
 # family, AudibleSoundDefinitionClass, and RegistryClass.
 if(RTS_RENDERER_LOWER STREQUAL "bgfx")
-    target_sources(z_ww3d2 PRIVATE ww3d2_bgfx_stubs.cpp)
+    target_sources(z_ww3d2 PRIVATE
+        ww3d2_bgfx_stubs.cpp
+        # stb_truetype-backed FontCharsClass / Render2DSentenceClass impl.
+        # Lives in Core/ so both vanilla and ZH builds compile the same file.
+        ${CMAKE_SOURCE_DIR}/Core/Libraries/Source/WWVegas/WW3D2/render2dsentence_bgfx.cpp
+    )
     target_include_directories(z_ww3d2 PRIVATE
         ${CMAKE_SOURCE_DIR}/Core/Libraries/Source/WWVegas/WWAudio
         ${CMAKE_SOURCE_DIR}/Core/Libraries/Source/WWVegas/WWLib

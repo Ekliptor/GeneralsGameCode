@@ -256,3 +256,88 @@ Smaller gadget draws (#3+) have proper UVs — e.g. `uv0=(0,0.303) uv1=(0.921,0)
 **Not fixed in this session.** Fixing requires tracing `Image::m_UV` initialization for backdrop images and/or making `drawImage` substitute `(0,0,1,1)` when `getUV()` returns a degenerate rect. That's a self-contained edit but needs careful handling because atlased images rely on real UV rects.
 
 **Diagnostic code removed from BgfxBackend.cpp + render2d.cpp** before end of session. No code changes landed as a result of this round — purely investigation.
+
+## Resolution — round 5 (2026-04-24): button text, click crash, hover
+
+### 5.1 Button text rendering — **FIXED**
+
+§3.3 was the outstanding item from round 3: `FontCharsClass` and `Render2DSentenceClass` were empty stubs on the BGFX build because the real DX8 impl in `render2dsentence.cpp` is gated to `RTS_RENDERER_DX8` and its `FontCharsClass::Create_GDI_Font` path uses Win32 GDI.
+
+**Fix.** New file `Core/Libraries/Source/WWVegas/WW3D2/render2dsentence_bgfx.cpp` (compiled for BGFX builds only via both `Generals/…/CMakeLists.txt` and the ZH sibling). Uses `stb_truetype` (bundled at `Core/Libraries/Source/WWVegas/WW3D2/ThirdParty/stb_truetype.h`) to rasterize glyphs into a 1024×1024 A8R8G8B8 atlas on first use, then emits textured quads through the existing `Render2DClass` pipeline that the round-8 vanilla 2D-pipeline fix unblocked. `FontCharsClass` and `Render2DSentenceClass` are now real classes; per-instance backend state is held in side-tables keyed by object pointer so the shared public headers need no new fields.
+
+Font family names requested from `FontDesc` (Arial, Tahoma, Times New Roman, the custom "Generals", "FixedSys" etc.) all map to the same two macOS TTFs — `/System/Library/Fonts/Supplemental/Arial.ttf` and `Arial Bold.ttf` — with a fallback list for Linux/Windows paths. Typography isn't a pixel-exact match for the original GDI fonts but is legible and consistent at every requested point size.
+
+**Key landmine found during bring-up.** Each `Render2DSentenceClass` instance owns its own internal `Render2DClass` to accumulate glyph quads. `Render2DClass` converts input coords to NDC inside `Add_Quad` using the instance's `CoordinateScale`/`CoordinateOffset`, which default to `(1,1)` and `(0,0)` — i.e., quads are assumed to already be in NDC. `W3DDisplay`'s singleton `m_2DRender` gets `Set_Coordinate_Range` called whenever the screen size changes, but our per-sentence renderer does not, so every frame's `Draw_Sentence` must now `Set_Coordinate_Range(Render2DClass::Get_Screen_Resolution())` before adding quads. Missing that is the difference between "quads submit, nothing shows (off-screen in NDC)" and "text renders cleanly."
+
+**Stub removal.** Removed the `Render2DSentenceClass::*` stubs and the `FontCharsClass::Get_Char_Spacing` stub from `ww3d2_bgfx_stubs.cpp` (both vanilla + ZH copies). `WW3DAssetManager::Get_FontChars` now does the real DX8 FontCharsList look-up + lazy construct (mirrors `assetmgr.cpp`'s DX8 body). `Release_All_FontChars` also now actually releases.
+
+**Verified.** Screenshots of both targets show all six main-menu button labels (`SOLO PLAY`, `MULTIPLAYER`, `LOAD`, `OPTIONS`, `CREDITS`, `EXIT GAME`). Tested with `scripts/run-game.sh --target zh -- -screenshot /tmp/zh-menu.tga` and `--target generals`.
+
+### 5.2 ZH main-menu click crash (`W3DTreeBuffer::unitMoved` null deref) — **FIXED**
+
+Clicking the first ZH menu button crashed with EXC_BAD_ACCESS at `Core/GameEngineDevice/Source/W3DDevice/GameClient/W3DTreeBuffer.cpp:1191` dereferencing `m_treeTypes[tt].m_data->m_doTopple`. Faulting address was `0x20` (offset of `m_doTopple` within `W3DTreeDrawModuleData`), with `x8=0` confirming `m_data` was null.
+
+**Root cause.** Shell‑map physics simulation runs behind the menu. The shell map references trees whose `TTreeType` entries carry a valid mesh but a null `m_data` (no `W3DTreeDraw` module binding) on the BGFX build. The existing defensive skip at line 1182 handles `treeType<0` but not a null module pointer.
+
+**Fix.** Capture `m_treeTypes[tt].m_data` once and `continue` when it's null, in the same style as the adjacent `treeType<0` skip. Kept local to `W3DTreeBuffer.cpp`; the deeper question of why the shell map leaves those type entries unbound on BGFX is orthogonal and not required to unblock clicks.
+
+### 5.3 ZH button hover — **MECHANISM VERIFIED CORRECT**
+
+The initial observation "ZH doesn't hover like vanilla" was driven by the missing button text + a subtle ZH theme palette rather than a broken hover path. Concrete findings from throwaway instrumentation:
+
+- `GadgetPushButtonInput` gets `GWM_MOUSE_ENTERING` and sets `WIN_STATE_HILITED`; all six main-menu buttons have `GWS_MOUSE_TRACK` on their style (`style=0x401`), which is what gates the hilite.
+- The three-image draw path (`W3DGadgetPushButtonImageDrawThree` at `W3DPushButton.cpp:509`) resolves `Buttons-HiLite-Left`, `Buttons-HiLite-Middle`, `Buttons-HiLite-Right` to valid `Image*` pointers — hilite images exist and load.
+- A temporary force-hilite override (set `WIN_STATE_HILITED` on every button before dispatch) rendered all buttons with a distinctly darker red fill vs the normal thin-orange border — hilite images DO produce a visible change when the state bit is on.
+- Post-fix `-screenshot` captures show the EXIT GAME button sporting the yellow top-edge hover indicator (the mouse happens to sit near the bottom of the screen during capture). So the hover dispatch does fire in practice.
+
+No code changes landed for this item; instrumentation was removed before end of session. If live interactive testing still reports hover not firing on a specific button, the next diagnostic target is SDL mouse-motion→`GameWindowManager::winSendInputMsg(window, GWM_MOUSE_ENTERING)` routing (`GameWindowManager.cpp:1160`).
+
+## Cross-platform compatibility — round 11 status (2026-04-24)
+
+A second-tier audit (covering `sizeof(time_t|off_t|size_t|wchar_t|uintptr_t|intptr_t|ptrdiff_t)` plus the game's own `WideChar|Int|UnsignedInt|Real|Bool` typedefs) identified three live cases of cross-platform serialization byte-count divergence. All three are now fixed (R9–R10). Round 11 added a fourth fix (replay file wide-char I/O) after a focused audit of the remaining `sizeof(WideChar)` consumers. Two known divergences remain documented as deferred (LANMessage packed-struct + Xfer base-class).
+
+### CRC value divergence — **FIXED**
+
+`Core/Libraries/Source/WWVegas/WWLib/crc.cpp` and `CRC.h`: `CRCEngine` chunked input data by `sizeof(long)` (4 bytes on Win32, 8 bytes on 64-bit macOS — the LP64 vs LLP64 split). Same input bytes therefore produced a *different CRC value* on macOS than on Win32. Fixed by switching the staging-buffer union, the bulk-processing pointer/counter, and the per-iteration decrement to `uint32_t` (4 bytes on every platform). `_lrotl` was already 32-bit on macOS via `intrin_compat.h:75`. Risk was low — `CRCEngine` has no live callers in active game code (savegame integrity uses `XferCRC`, INI hashing uses byte-by-byte `CRC::String`; both already platform-safe). The fix prevents any future user of `CRCEngine` from getting platform-divergent values.
+
+### `DataChunk` Unicode string wire format — **FIXED**
+
+`Generals/Code/GameEngine/Source/Common/System/DataChunk.cpp` and the byte-identical GeneralsMD sibling: `writeUnicodeString` and `readUnicodeString` used `len * sizeof(WideChar)` for the on-disk save/map chunk format. `WideChar = wchar_t` is 2 bytes on Win32 but 4 bytes on macOS, so save/map files written on one platform could not be read on the other. Fixed by adopting the existing `parseCSF` pattern (round 3.2 of this document) — narrow into a `uint16_t` staging buffer on write, widen back to `WideChar` on read. Disk format is now a stable 2 bytes per char (UCS-2) on every platform. Existing macOS-written saves (if any) become unreadable post-fix, which is acceptable at the BGFX port's current stage.
+
+Both fixes verified: `generalsv.app` and `generalszh.app` build clean and launch without behavioral change. `DataChunk` is only invoked from `writeDict`/`readDict` (binary chunk I/O — saves/maps), not from any menu-loading path; `CRCEngine` has no game-code callers; so no visual or runtime regression is possible from these edits.
+
+### Network packet wire format — **FIXED (round 10, 2026-04-24)**
+
+`Core/GameEngine/Include/GameNetwork/NetPacketStructs.h`, `NetPacketStructs.cpp`, and `NetPacket.cpp` previously serialized `UnicodeString` and `WIDECHAR` game-message arguments as `len * sizeof(WideChar)` bytes — 2 bytes/char on Win32, 4 bytes/char on macOS. The length prefix is a *char count*, so a mixed-platform reader walked the wrong number of bytes and corrupted every subsequent read in the packet. Cross-platform multiplayer was effectively broken for any chat / disconnect-chat / WIDECHAR-arg-bearing game message.
+
+**Fix:** mirror the DataChunk / parseCSF pattern — added a symmetric `network::readStringWithoutNull` helper and rewrote `network::writeStringWithoutNull` to narrow into a `uint16_t` staging buffer. Wire format is now stable at 2 bytes per char (UCS-2) on every platform. The four `getSize` pre-allocators in `NetPacketStructs.cpp` (`NetPacketChatCommandData`, `NetPacketDisconnectChatCommandData`, `NetPacketGameCommandData::ARGUMENTDATATYPE_WIDECHAR`) were updated to use `sizeof(uint16_t)`, the WIDECHAR arg writer now narrows to `uint16_t` before `writePrimitive`, and the three reader sites in `NetPacket.cpp` (`readDisconnectChatMessage`, `readChatMessage`, `ARGUMENTDATATYPE_WIDECHAR` reader) all widen 2-byte wire bytes back into `WideChar` slots.
+
+**Win32 wire compat preserved:** on Win32 `sizeof(WideChar) == 2`, so the narrow/widen round-trip is a no-op at runtime. Existing Win32 clients read/write the exact same bytes. macOS clients are now wire-compatible with Win32 for the first time.
+
+**Verified:** both targets build clean (no narrowing warnings), launch successfully, screenshots match round 9 baseline. Multiplayer end-to-end testing not possible — multiplayer subsystem isn't functional on the BGFX port yet (audio + UI text gaps still open, see §3.3, §3.4) — but the byte-count math is now identical on every platform.
+
+### Replay file wide-char I/O — **FIXED (round 11, 2026-04-24)**
+
+`Core/GameEngine/Source/Common/System/LocalFile.cpp`'s `readWideChar`, `writeFormat(const WideChar*, ...)`, and `writeChar(const WideChar*)` previously read/wrote `sizeof(WideChar)` bytes per character — 2 on Win32, 4 on macOS. The wide-char file I/O surface has exactly one consumer in the entire codebase: `Recorder.cpp` (replay header strings: `replayName`, `versionString`, `versionTimeString`). Replays are explicitly intended to be cross-player-portable (the version strings encode a CRC-mismatch protocol), so the divergence broke the design.
+
+**Fix:** All three methods now read/write via a `uint16_t` UCS-2 staging buffer. Win32 wire compat preserved (`sizeof(WideChar) == 2 == sizeof(uint16_t)` on Win32 means narrow/widen is a no-op there). The fix lives entirely below the `File` abstraction; neither `Recorder.cpp` (both targets), `RAMFile` (no-op overrides), nor `StdLocalFile` (inherits) needed source changes. macOS-recorded replays from earlier R10/R11 builds become unreadable, but no live macOS replay archive exists.
+
+### GameSpy / OpenSpy chat — **VERIFIED SAFE (round 11)**
+
+The live online multiplayer chat path in `Core/GameEngine/Source/GameNetwork/GameSpy/` (which TheSuperHackers points at OpenSpy at `server.cnc-online.net`) is already cross-platform safe. Every `UnicodeString → wire` handoff goes through `WideCharStringToMultiByte(CP_UTF8, ...)` before reaching the SDK's `gsi_char = char` boundary. UTF-8 over the wire is platform-width-independent. Verified call sites: `PeerThread.cpp:1482-1490` (chat), `BuddyThread.cpp:315/340` (buddy messages), `StagingRoomGameInfo.cpp:504` (game name in status), `GameInfo.cpp:955` (slot-name lobby serialization). No fix needed.
+
+### LANMessage packed-struct wire format — **OPEN, deferred**
+
+`Core/GameEngine/Include/GameNetwork/LANAPI.h:158+` defines `LANMessage` as a `#pragma pack(push, 1)` struct that embeds `WideChar name[g_lanPlayerNameLength+1]`, `WideChar gameName[g_lanGameNameLength+1]`, and several other `WideChar[]` fields directly. The whole struct is `memcpy`'d to the wire by the legacy lanapi LAN-game-discovery code. Each `WideChar` field is 2 bytes per slot on Win32, 4 on macOS — so the struct's `sizeof()` differs across platforms and the wire bytes don't align.
+
+The current workaround at `Core/GameEngine/Include/GameNetwork/NetworkDefs.h:69–77` accommodates the inflated macOS struct by raising `MAX_LANAPI_PACKET_SIZE` from Win32's 476 to 700 on non-Windows builds — same-platform LAN play works, but cross-platform Win32↔macOS LAN is not byte-compatible. The TODO comment at lines 69–72 documents this and stays in place.
+
+**Why deferred:** Fixing this requires either (a) replacing every embedded `WideChar[]` field with a `uint16_t[]` array of fixed wire size, plus serialize/deserialize at the boundary, or (b) restructuring the LAN protocol to use length-prefixed strings via the same helper pattern as NetPacket. Either is a larger, focused change. LAN multiplayer is also legacy: `docs/CrossPlatformPort-Plan.md:180` flags networking rewrite (Steam GameNetworkingSockets) as future work that may moot a packed-struct fix entirely.
+
+### Xfer base-class `xferUnicodeString` — **OPEN, needs reachability audit**
+
+`Core/GameEngine/Source/Common/System/Xfer.cpp:204` base-class `Xfer::xferUnicodeString` multiplies by `sizeof(WideChar)`. `XferLoad` and `XferSave` have their own overrides that handle the wire format correctly. Whether the base class is reachable in any real save path needs a focused audit before any fix; if it's only ever called via the overrides, the base is dead-buggy but harmless.
+
+### Audit summary (closed)
+
+After rounds 8–11, all known cross-platform `sizeof(typedef)` divergence in *active* serialization paths is fixed: vertex layout (R8 dx8fvf), CRC chunking (R9), DataChunk save/map Unicode (R9), NetPacket chat/game-command Unicode (R10), Replay file wide-char I/O (R11). Live online chat (GameSpy/OpenSpy) is already UTF-8 over the wire and platform-safe. Two divergences remain explicitly deferred with rationale: the LANMessage packed struct and the Xfer base class. No other stale `sizeof(DWORD|LONG|WORD|BYTE|long|unsigned long|time_t|off_t|size_t|wchar_t|uintptr_t|intptr_t|ptrdiff_t)` spots were found in `Generals/` vs `GeneralsMD/` or in shared `Core/`. The game's `Int`/`UnsignedInt`/`Real` typedefs in `BaseTypeCore.h` are stdint-based and fixed-width on every platform. See the `dword_is_8_bytes_on_macos.md` memory entry for the full pattern catalogue.

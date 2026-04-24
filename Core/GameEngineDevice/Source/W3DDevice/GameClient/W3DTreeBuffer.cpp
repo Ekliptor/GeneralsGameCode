@@ -1187,15 +1187,21 @@ void W3DTreeBuffer::unitMoved(Object *unit)
 				delta.set(m_trees[treeNdx].location.X, m_trees[treeNdx].location.Y, m_trees[treeNdx].location.Z );
 				delta.sub(&pos);
 				if (radius*radius>delta.lengthSqr()) {
+					const W3DTreeDrawModuleData *td = m_treeTypes[m_trees[treeNdx].treeType].m_data;
+					if (td == nullptr) {
+						// Tree type with no bound W3DTreeDraw module data (shell map on BGFX build).
+						treeNdx = m_trees[treeNdx].nextInPartition;
+						continue;
+					}
 					bool canTopple = unit->getCrusherLevel() > 1;
-					if (canTopple && m_treeTypes[m_trees[treeNdx].treeType].m_data->m_doTopple) {
+					if (canTopple && td->m_doTopple) {
 						// Give a vector with direction to thing.
 						Coord3D toppleVector;
 						toppleVector.set(m_trees[treeNdx].location.X, m_trees[treeNdx].location.Y, 0);
 						toppleVector.x -= unit->getPosition()->x;
 						toppleVector.y -= unit->getPosition()->y;
 						applyTopplingForce(m_trees+treeNdx, &toppleVector, 0, W3D_TOPPLE_OPTIONS_NONE);
-					} else if (m_treeTypes[m_trees[treeNdx].treeType].m_data->m_framesToMoveOutward>1) {
+					} else if (td->m_framesToMoveOutward>1) {
 						pushAsideTree(m_trees[treeNdx].drawableID, &pos, unit->getUnitDirectionVector2D(), unit->getID());
 					}
 				}

@@ -170,6 +170,17 @@ int main(int argc, char *argv[])
 #endif
 
 			SDL_ShowWindow(SDLDevice::TheSDLWindow);
+			// macOS windowed mode: SDL_ShowWindow on a hidden window uses
+			// orderFront: (not makeKeyAndOrderFront:), so the app may not be
+			// frontmost when OpenAL's ALC context is created inside GameMain().
+			// CoreAudio's default-device selection for a backgrounded app then
+			// binds the context to a route that never produces audible output,
+			// and focus events after the fact don't rebind it. Raise the window
+			// and drain the stale window-event queue so we enter the main loop
+			// as the key window, matching the fullscreen path.
+			SDL_RaiseWindow(SDLDevice::TheSDLWindow);
+			SDL_PumpEvents();
+			SDL_FlushEvents(SDL_EVENT_WINDOW_FIRST, SDL_EVENT_WINDOW_LAST);
 		}
 
 		TheVersion = NEW Version;

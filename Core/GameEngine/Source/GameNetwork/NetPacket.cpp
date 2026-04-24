@@ -971,10 +971,13 @@ void NetPacket::readGameMessageArgumentFromPacket(GameMessageArgumentDataType ty
 		break;
 
 	case ARGUMENTDATATYPE_WIDECHAR:
-		WideChar c;
-		memcpy(&c, data + i, sizeof(c));
-		i += sizeof(c);
-		arg.wChar = c;
+		// 2026-04-24 wire format is 2 bytes
+		// per WIDECHAR arg, independent of platform WideChar width — see
+		// the matching writer in NetPacketStructs.cpp.
+		uint16_t cWire;
+		memcpy(&cWire, data + i, sizeof(uint16_t));
+		i += sizeof(uint16_t);
+		arg.wChar = static_cast<WideChar>(cWire);
 		msg->addArgument(type, arg);
 		break;
 
@@ -1201,8 +1204,12 @@ NetCommandMsg * NetPacket::readDisconnectChatMessage(UnsignedByte *data, Int &i)
 	UnsignedByte length;
 	memcpy(&length, data + i, sizeof(UnsignedByte));
 	++i;
-	memcpy(text, data + i, length * sizeof(WideChar));
-	i += length * sizeof(WideChar);
+	// 2026-04-24 wire format is 2 bytes per
+	// char (UCS-2) — see network::readStringWithoutNull. Previously this read
+	// length*sizeof(WideChar), which is 4 bytes on macOS and broke cross-
+	// platform multiplayer (and read the wrong number of bytes from
+	// macOS-authored packets even on macOS).
+	i += static_cast<Int>(network::readStringWithoutNull(text, data + i, length));
 	text[length] = 0;
 
 	UnicodeString unitext;
@@ -1225,8 +1232,9 @@ NetCommandMsg * NetPacket::readChatMessage(UnsignedByte *data, Int &i) {
 	Int playerMask;
 	memcpy(&length, data + i, sizeof(UnsignedByte));
 	++i;
-	memcpy(text, data + i, length * sizeof(WideChar));
-	i += length * sizeof(WideChar);
+	// 2026-04-24 wire format is 2 bytes per
+	// char — see readDisconnectChatMessage above for rationale.
+	i += static_cast<Int>(network::readStringWithoutNull(text, data + i, length));
 	text[length] = 0;
 	memcpy(&playerMask, data + i, sizeof(Int));
 	i += sizeof(Int);

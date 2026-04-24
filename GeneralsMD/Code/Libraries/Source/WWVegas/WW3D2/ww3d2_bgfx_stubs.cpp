@@ -286,7 +286,30 @@ void WW3DAssetManager::Release_Texture(TextureClass * tex)
 
 void WW3DAssetManager::Load_Procedural_Textures() {}
 Font3DInstanceClass * WW3DAssetManager::Get_Font3DInstance(const char * /*name*/) { return nullptr; }
-FontCharsClass * WW3DAssetManager::Get_FontChars(const char * /*name*/, int /*point_size*/, bool /*is_bold*/) { return nullptr; }
+
+// Real FontChars resolution for the BGFX build. Mirrors the DX8 path in
+// assetmgr.cpp: reuse an existing matching entry, otherwise construct and
+// initialize a new FontCharsClass (which loads a TTF + allocates a glyph
+// atlas in render2dsentence_bgfx.cpp). Needed so button labels render —
+// see docs/ZH-MainMenu-Bugs.md §3.3.
+FontCharsClass * WW3DAssetManager::Get_FontChars(const char * name, int point_size, bool is_bold)
+{
+    for (int i = 0; i < FontCharsList.Count(); ++i) {
+        if (FontCharsList[i]->Is_Font(name, point_size, is_bold)) {
+            FontCharsList[i]->Add_Ref();
+            return FontCharsList[i];
+        }
+    }
+    FontCharsClass * font = NEW_REF(FontCharsClass, ());
+    if (font->Initialize_GDI_Font(name, point_size, is_bold)) {
+        font->Add_Ref();
+        FontCharsList.Add(font);
+        return font;
+    }
+    font->Release_Ref();
+    return nullptr;
+}
+
 AssetIterator * WW3DAssetManager::Create_HTree_Iterator() { return nullptr; }
 HTreeClass * WW3DAssetManager::Get_HTree(const char * /*name*/) { return nullptr; }
 void WW3DAssetManager::Register_Prototype_Loader(PrototypeLoaderClass * /*loader*/) {}
@@ -298,7 +321,13 @@ void WW3DAssetManager::Remove_Font3DData(Font3DDataClass * /*font*/) {}
 Font3DDataClass * WW3DAssetManager::Get_Font3DData(const char * /*name*/) { return nullptr; }
 void WW3DAssetManager::Release_All_Font3DDatas() {}
 void WW3DAssetManager::Release_Unused_Font3DDatas() {}
-void WW3DAssetManager::Release_All_FontChars() {}
+void WW3DAssetManager::Release_All_FontChars()
+{
+    while (FontCharsList.Count()) {
+        FontCharsList[0]->Release_Ref();
+        FontCharsList.Delete(0);
+    }
+}
 
 // ============================================================================
 // HLodClass constructors now come from the real hlod.cpp (gate lifted).
@@ -384,54 +413,8 @@ PrototypeClass * AggregateLoaderClass::Load_W3D(ChunkLoadClass & /*chunk_load*/)
 ParticleEmitterLoaderClass _ParticleEmitterLoader;
 PrototypeClass * ParticleEmitterLoaderClass::Load_W3D(ChunkLoadClass & /*chunk_load*/) { return nullptr; }
 
-// ============================================================================
-// Render2DSentenceClass
-// ============================================================================
-
-Render2DSentenceClass::Render2DSentenceClass()
-    : Font(nullptr)
-    , BaseLocation(0.0f, 0.0f)
-    , Location(0.0f, 0.0f)
-    , Cursor(0.0f, 0.0f)
-    , TextureOffset(0, 0)
-    , TextureStartX(0)
-    , CurrTextureSize(0)
-    , TextureSizeHint(0)
-    , CurSurface(nullptr)
-    , MonoSpaced(false)
-    , WrapWidth(0.0f)
-    , Centered(false)
-    , ClipRect(0, 0, 0, 0)
-    , DrawExtents(0, 0, 0, 0)
-    , IsClippedEnabled(false)
-    , ParseHotKey(false)
-    , useHardWordWrap(false)
-    , LockedPtr(nullptr)
-    , LockedStride(0)
-    , CurTexture(nullptr)
-{}
-
-Render2DSentenceClass::~Render2DSentenceClass() {}
-
-void Render2DSentenceClass::Reset() {}
-void Render2DSentenceClass::Reset_Polys() {}
-void Render2DSentenceClass::Set_Font(FontCharsClass * /*font*/) {}
-void Render2DSentenceClass::Set_Location(const Vector2 & /*loc*/) {}
-Vector2 Render2DSentenceClass::Get_Text_Extents(const WCHAR * /*text*/) { return Vector2(0,0); }
-Vector2 Render2DSentenceClass::Get_Formatted_Text_Extents(const WCHAR * /*text*/) { return Vector2(0,0); }
-void Render2DSentenceClass::Build_Sentence(const WCHAR * /*text*/, int * hkX, int * hkY)
-{
-    if (hkX) *hkX = -1;
-    if (hkY) *hkY = -1;
-}
-void Render2DSentenceClass::Draw_Sentence(uint32 /*color*/) {}
-void Render2DSentenceClass::Render() {}
-
-// ============================================================================
-// FontCharsClass::Get_Char_Spacing
-// ============================================================================
-
-int FontCharsClass::Get_Char_Spacing(WCHAR /*ch*/) { return 0; }
+// FontCharsClass + Render2DSentenceClass implementations live in
+// render2dsentence_bgfx.cpp (stb_truetype glyph rasterizer + atlas).
 
 // ============================================================================
 // TextureClass / TextureLoader / surfaceclass helpers

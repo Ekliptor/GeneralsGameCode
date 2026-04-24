@@ -926,7 +926,7 @@ void CPUDetectClass::Init_Memory()
 #endif // defined(_MSC_VER) && _MSC_VER < 1300
 
 #else
-	// TheSuperHackers @bugfix danielw 2026-04-23 Previously a stub on non-Win32,
+	// 2026-04-23 Previously a stub on non-Win32,
 	// which left TotalPhysicalMemory=0. GameLOD's m_memPassed check (needs
 	// >=256MB) then failed and force-disabled m_shellMapOn (GameLOD.cpp:621),
 	// which in turn made the Zero Hour shell map 3D background not render —

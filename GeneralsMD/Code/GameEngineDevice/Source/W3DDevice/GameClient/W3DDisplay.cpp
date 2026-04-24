@@ -2748,6 +2748,20 @@ void W3DDisplay::drawImage( const Image *image, Int startX, Int startY,
 
 	RectClass screen_rect(startX,startY,endX,endY);
 	RectClass uv_rect(uv->lo.x,uv->lo.y,uv->hi.x,uv->hi.y);
+	// BGFX backdrop fix: some backdrop Image objects ship with a zeroed UV
+	// region (never populated by the INI/asset loader). The DX8 path
+	// accidentally tolerated this because sampling texel (0,0) of a fully
+	// opaque backdrop texture still produced a correct-looking color. The
+	// BGFX path's SRC_ALPHA/INV_SRC_ALPHA default blend turns any alpha-0
+	// texel at (0,0) into black. Substitute a full-image UV rect so the
+	// backdrop renders the whole texture instead of a single point-sample.
+	if (uv_rect.Left == 0.0f && uv_rect.Right == 0.0f &&
+	    uv_rect.Top == 0.0f && uv_rect.Bottom == 0.0f) {
+		uv_rect.Left   = 0.0f;
+		uv_rect.Top    = 0.0f;
+		uv_rect.Right  = 1.0f;
+		uv_rect.Bottom = 1.0f;
+	}
 
 	if (m_isClippedEnabled)
 	{	//need to clip this quad to clip rectangle
