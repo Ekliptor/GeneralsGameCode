@@ -589,6 +589,7 @@ void W3DDisplay::setWidth( UnsignedInt width )
 	// our 2D renderer will use mapping coords to make (0,0) the upper left
 	// of the screen with (width,height) at the lower right
 	m_2DRender->Set_Coordinate_Range( RectClass( 0, 0, getWidth(), getHeight() ) );
+	Render2DClass::Set_Screen_Resolution( RectClass( 0, 0, getWidth(), getHeight() ) );
 
 }
 
@@ -604,6 +605,7 @@ void W3DDisplay::setHeight( UnsignedInt height )
 	// our 2D renderer will use mapping coords to make (0,0) the upper left
 	// of the screen with (width,height) at the lower right
 	m_2DRender->Set_Coordinate_Range( RectClass( 0, 0, getWidth(), getHeight() ) );
+	Render2DClass::Set_Screen_Resolution( RectClass( 0, 0, getWidth(), getHeight() ) );
 
 }
 
@@ -1817,7 +1819,11 @@ AGAIN:
 	do {
 
 		// update all views of the world - recomputes data which will affect drawing
+#ifdef RTS_RENDERER_DX8
 		if (DX8Wrapper::_Get_D3D_Device8() && (DX8Wrapper::_Get_D3D_Device8()->TestCooperativeLevel()) == D3D_OK)
+#else
+		if (true)
+#endif
 		{	//Checking if we have the device before updating views because the heightmap crashes otherwise while
 			//trying to refresh the visible terrain geometry.
 //			if(TheGlobalData->m_loadScreenRender != TRUE)

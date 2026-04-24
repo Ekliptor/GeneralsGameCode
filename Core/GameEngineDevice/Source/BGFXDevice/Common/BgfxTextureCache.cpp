@@ -92,6 +92,19 @@ uintptr_t Get_Or_Load_File(const char* path)
 		return 0;
 	}
 
+	// TheSuperHackers @bugfix danielw 2026-04-24 Vanilla Generals authored
+	// many 32-bit TGAs with `imageDescriptor.alphaBits = 0` even though all
+	// four channels carry data. bimg honors the descriptor literally —
+	// alphaBits=0 makes the alpha channel decode to zero, which then alpha-
+	// blends to fully transparent. ZH's TGAs use alphaBits=8 and decode
+	// correctly. Patch the descriptor on load so vanilla UI textures render.
+	// Affects TGA truecolor (image type 2, uncompressed) + RLE truecolor (10).
+	if (bytes.size() >= 18 && (bytes[2] == 2 || bytes[2] == 10) && bytes[16] == 32
+	    && (bytes[17] & 0x0f) == 0)
+	{
+		bytes[17] = static_cast<uint8_t>((bytes[17] & 0xf0) | 0x08);
+	}
+
 	const uintptr_t handle = backend->Create_Texture_From_Memory(
 		bytes.data(), static_cast<uint32_t>(bytes.size()));
 	if (handle == 0)

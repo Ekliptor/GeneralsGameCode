@@ -454,6 +454,14 @@ int TextureBaseClass::_Get_Total_Locked_Surface_Count()
 
 void TextureBaseClass::Apply_Null(unsigned int stage)
 {
+	// Mirror the bgfx-side unbind so SelectProgram's `hasStage1` test (driven
+	// by BgfxBackend::m_stageTexture[stage]) can see the cleared state. Without
+	// this, a prior 3D draw's stage-1 binding survives forever and any later
+	// 2D draw (which submits with TEX2 in dynamic_fvf_type) routes to the
+	// two-stage `tex2` program, sampling a stale stage-1 texture and producing
+	// black quads.
+	if (IRenderBackend* b = RenderBackendRuntime::Get_Active())
+		b->Set_Texture(stage, 0);
 	DX8Wrapper::Set_DX8_Texture(stage, nullptr);
 }
 

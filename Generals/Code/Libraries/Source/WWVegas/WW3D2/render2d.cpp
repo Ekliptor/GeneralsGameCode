@@ -636,6 +636,13 @@ void Render2DClass::Render()
 	vp.MaxZ		= 1;
 	DX8Wrapper::Set_Viewport(&vp);
 	DX8Wrapper::Set_Texture(0,Texture);
+	// BGFX: dynamic_fvf_type carries TEX2, so SelectProgram() picks the
+	// two-stage `tex2` program whenever stage 1 still has a stale binding
+	// from a prior 3D draw. Render2D only uses stage 0; explicitly clear
+	// stage 1 so SelectProgram falls through to the single-texture `tex`
+	// program. Inert on DX8 (stage-1 stage-state below configures ops/args,
+	// not bindings).
+	DX8Wrapper::Set_Texture(1,NULL);
 
 	VertexMaterialClass *vm=VertexMaterialClass::Get_Preset(VertexMaterialClass::PRELIT_DIFFUSE);
 	DX8Wrapper::Set_Material(vm);
