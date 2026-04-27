@@ -119,6 +119,10 @@
 #include "wwmemlog.h"
 #include <wwprofile.h>
 
+#ifndef RTS_RENDERER_DX8
+#include "MeshDirectRender.h"   // Phase D7 — direct-submit BGFX path
+#endif
+
 
 bool MeshClass::Legacy_Meshes_Fogged = true;
 
@@ -689,6 +693,29 @@ void MeshClass::Render(RenderInfoClass & rinfo)
 			*/
 			if (Model->PolygonRendererList.Is_Empty()) {
 				Model->Register_For_Rendering();
+				// Phase C v1 (BGFX scene wireup): Register_For_Rendering's
+				// terminal call into TheDX8MeshRenderer.Register_Mesh_Type
+				// is a stub in bgfx mode (ww3d2_bgfx_stubs.cpp), so the
+				// list stays empty. Phase D7 (Route C3): bypass the DX8
+				// polygon-renderer batching system entirely and direct-
+				// submit this mesh's vertex/index data through bgfx.
+				// Returns true on submission; rest of Render() is a no-op
+				// then because Add_Render_Task / Flush are stubbed.
+				if (Model->PolygonRendererList.Is_Empty()) {
+#ifndef RTS_RENDERER_DX8
+					if (WW3D2::Render_Mesh_Direct_Bgfx(*this, rinfo))
+						return;
+#endif
+					static bool s_warnedEmpty = false;
+					if (!s_warnedEmpty) {
+						s_warnedEmpty = true;
+						fprintf(stderr,
+							"[PhaseD7-warn] MeshClass::Render: "
+							"direct-submit fell through (skin / no model / "
+							"empty geometry).\n");
+					}
+					return;
+				}
 				WWASSERT(!Model->PolygonRendererList.Is_Empty());
 			}
 
@@ -783,6 +810,14 @@ void MeshClass::Render(RenderInfoClass & rinfo)
  *=============================================================================================*/
 void MeshClass::Render_Material_Pass(MaterialPassClass * pass,IndexBufferClass * ib)
 {
+	// Phase C v1 (BGFX): every branch below dereferences
+	// Model->PolygonRendererList (Peek_Head + iter). The list stays empty
+	// in bgfx mode (Register_Mesh_Type stub), so the same null-deref hazard
+	// as MeshClass::Render applies here. Bail before touching it.
+	if (Model->PolygonRendererList.Is_Empty()) {
+		return;
+	}
+
 	//Added to allow dynamic opacity on additional render passed
 	//without having to create a new material pass per object instance. -MW
 	float oldOpacity=-1.0f;

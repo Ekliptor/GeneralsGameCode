@@ -86,6 +86,10 @@
 #include "GameLogic/Object.h"
 #include "GameLogic/ScriptEngine.h"		// For TheScriptEngine - jkmcd
 
+// Auto-skirmish helpers — defined in GUICallbacks/Menus/AutoSkirmish.cpp.
+// Returns true once the launch has been initiated (call site stops trying).
+extern Bool TryAutoSkirmishLaunch(const AsciiString& explicitMap);
+
 #define DRAWABLE_HASH_SIZE	8192
 
 /// The GameClient singleton instance
@@ -612,6 +616,27 @@ void GameClient::update()
 		}
 	}
 
+	// `-skirmish [<map>]`: once the shell is active, drive the same MSG_NEW_GAME
+	// path the SkirmishGameOptions menu's Start button takes. One-shot — the
+	// helper clears the m_autoSkirmish flag so we don't re-trigger after the
+	// game is loaded. Used for in-game terrain / lighting / unit verification
+	// without hand-driving the menu UI.
+	if (TheGlobalData->m_autoSkirmish
+		&& !TheGlobalData->m_afterIntro
+		&& TheShell && TheShell->isShellActive()
+		&& TheDisplay && !TheDisplay->isMoviePlaying())
+	{
+		if (TryAutoSkirmishLaunch(TheGlobalData->m_autoSkirmishMap))
+		{
+			TheWritableGlobalData->m_autoSkirmish = FALSE;
+			// Map load + first-frame settle takes longer than the menu
+			// countdown — bump the screenshot timer if armed so the capture
+			// lands on actual gameplay instead of the load screen.
+			if (!TheWritableGlobalData->m_screenshotPath.isEmpty())
+				TheWritableGlobalData->m_screenshotCountdownFrames = 1500;
+		}
+	}
+
 	// `-screenshot <path>`: once the intro is finished and the shell menu
 	// is live, count down a few frames so the UI has settled, then take a
 	// one-shot screenshot and request a clean exit. `bgfx::requestScreenShot`
@@ -621,8 +646,9 @@ void GameClient::update()
 	// break out.
 	if (!TheGlobalData->m_screenshotPath.isEmpty()
 		&& !TheGlobalData->m_afterIntro
-		&& TheShell && TheShell->isShellActive()
-		&& TheDisplay && !TheDisplay->isMoviePlaying())
+		&& TheDisplay && !TheDisplay->isMoviePlaying()
+		&& ((TheShell && TheShell->isShellActive())
+		    || (TheGameLogic && TheGameLogic->isInGame())))
 	{
 		if (TheWritableGlobalData->m_screenshotCountdownFrames > 0)
 		{

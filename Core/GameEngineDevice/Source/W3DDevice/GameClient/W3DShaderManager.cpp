@@ -71,6 +71,10 @@
 #include "Common/GlobalData.h"
 #include "Common/GameLOD.h"
 #include "dx8caps.h"
+#ifndef RTS_RENDERER_DX8
+#include "WW3D2/IRenderBackend.h"
+#include "WW3D2/RenderBackendRuntime.h"
+#endif
 
 
 // Turn this on to turn off pixel shaders. jba[4/3/2003]
@@ -2701,7 +2705,19 @@ void W3DShaderManager::updateCloud()
 //=============================================================================
 Int W3DShaderManager::getShaderPasses(ShaderTypes shader)
 {
+#ifndef RTS_RENDERER_DX8
+	// Phase B (BGFX terrain refinement): the multi-pass terrain renderer
+	// needs the per-pass setShader() to install cloud / lightmap texture
+	// stages via direct D3D calls (TerrainShader2Stage::set, line ~1629).
+	// Those calls go through DX8Wrapper::_Get_D3D_Device8() which is null
+	// in bgfx mode. Force a single pass so HeightMapRenderObjClass::Render
+	// emits one Draw_Triangles per tile with the default vertex/material
+	// state and skips the cloud/lightmap blending. setShader() below is
+	// gated to a no-op so it cannot crash on the null device.
+	return 1;
+#else
 	return W3DShadersPassCount[shader];
+#endif
 }
 
 // W3DShaderManager::setShader =======================================================
@@ -2715,9 +2731,59 @@ Int W3DShaderManager::setShader(ShaderTypes shader, Int pass)
 		return TRUE;	//shader is already set
 	m_currentShader=shader;
 	m_currentShaderPass = pass;
+#ifndef RTS_RENDERER_DX8
+	// Phase D part 2 (BGFX): the per-shader W3DShaderInterface::set
+	// bodies touch the null D3D device for cloud/lightmap/noise stage
+	// setup, but the diffuse base at stage 0 is the visible terrain
+	// surface and must reach DX8Wrapper::Set_Texture so the bgfx
+	// backend's m_stageTexture[0] is non-zero.
+	DX8Wrapper::Set_Texture(0, m_Textures[0]);
+	// Phase D5 (BGFX): for the terrain shader family, also bind stage 1
+	// (the alpha-edge atlas — same TerrainTextureClass in the heightmap
+	// path; FlatHeightMap and tiles using m_stageOneTexture wire it
+	// differently but still hand it off via setTexture(1,...)). The bgfx
+	// terrain program samples both stages and folds the DX8 multipass
+	// (base + alpha-edge alpha-blend) into one fragment.
+	// Phase D6 (BGFX): bind stage 2 (cloud) and stage 3 (lightmap/noise)
+	// from m_Textures[2..3] when the variant uses them. The bgfx terrain
+	// shader multiplies cloud × lightmap into the composite; absent slots
+	// fall back to a 2×2 white placeholder for an identity multiply.
+	const bool isTerrainShader =
+	    shader == ST_TERRAIN_BASE ||
+	    shader == ST_TERRAIN_BASE_NOISE1 ||
+	    shader == ST_TERRAIN_BASE_NOISE2 ||
+	    shader == ST_TERRAIN_BASE_NOISE12;
+	if (isTerrainShader)
+	{
+		DX8Wrapper::Set_Texture(1, m_Textures[1]);
+
+		const bool useCloud =
+		    shader == ST_TERRAIN_BASE_NOISE1 ||
+		    shader == ST_TERRAIN_BASE_NOISE12;
+		const bool useLightmap =
+		    shader == ST_TERRAIN_BASE_NOISE2 ||
+		    shader == ST_TERRAIN_BASE_NOISE12;
+		DX8Wrapper::Set_Texture(2, useCloud    ? m_Textures[2] : nullptr);
+		DX8Wrapper::Set_Texture(3, useLightmap ? m_Textures[3] : nullptr);
+
+		if (IRenderBackend* b = RenderBackendRuntime::Get_Active())
+		{
+			b->Set_Terrain_Pass_Active(true);
+			// STRETCH_FACTOR matches updateNoise1 / updateNoise2 in
+			// TerrainShader2Stage (see W3DShaderManager.cpp:1612).
+			const float stretch = 1.f / (63.f * MAP_XY_FACTOR / 2.f);
+			b->Set_Terrain_Cloud_Params(
+			    terrainShader2Stage.m_xOffset,
+			    terrainShader2Stage.m_yOffset,
+			    stretch);
+		}
+	}
+	return TRUE;
+#else
 	if (W3DShaders[shader])
 		return W3DShaders[shader]->set(pass);
 	return FALSE;
+#endif
 }
 
 // W3DShaderManager::resetShader =======================================================
@@ -2730,9 +2796,26 @@ void W3DShaderManager::resetShader(ShaderTypes shader)
 {
 	if (m_currentShader == ST_INVALID)
 		return;	//last shader is already reset.
+#ifndef RTS_RENDERER_DX8
+	// Symmetrical to setShader gate above — W3DShaderInterface::reset bodies
+	// touch the null DX8 device. WW3D2's own shader/state cache still gets
+	// invalidated by the m_currentShader = ST_INVALID assignment.
+	// Phase D5: clear the terrain-shader override and unbind stage 1 so
+	// follow-on draws (HUD, units once they land) don't accidentally route
+	// through m_progTerrain or carry stage 1's terrain atlas.
+	// Phase D6: also unbind stages 2/3 (cloud / lightmap).
+	if (IRenderBackend* b = RenderBackendRuntime::Get_Active())
+		b->Set_Terrain_Pass_Active(false);
+	DX8Wrapper::Set_Texture(1, nullptr);
+	DX8Wrapper::Set_Texture(2, nullptr);
+	DX8Wrapper::Set_Texture(3, nullptr);
+	m_currentShader = ST_INVALID;
+	return;
+#else
 	if (W3DShaders[shader])
 		W3DShaders[shader]->reset();
 	m_currentShader = ST_INVALID;
+#endif
 }
 // W3DShaderManager::filterPreRender =======================================================
 /** Call to view filter shaders before rendering starts.

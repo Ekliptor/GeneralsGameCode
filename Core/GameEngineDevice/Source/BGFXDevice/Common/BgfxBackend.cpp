@@ -41,6 +41,7 @@ void* s_cached_nwh = nullptr;
 #define BGFX_PLATFORM_SUPPORTS_WGSL  0
 #include <bgfx/embedded_shader.h>
 #include <bgfx/platform.h>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 
@@ -93,6 +94,14 @@ void* s_cached_nwh = nullptr;
 #include <fs_tex_mlit/glsl/fs_tex_mlit.sc.bin.h>
 #include <fs_tex_mlit/essl/fs_tex_mlit.sc.bin.h>
 
+// Phase D5 single-pass terrain (base atlas + alpha-edge mix * vColor).
+#include <vs_terrain/metal/vs_terrain.sc.bin.h>
+#include <vs_terrain/glsl/vs_terrain.sc.bin.h>
+#include <vs_terrain/essl/vs_terrain.sc.bin.h>
+#include <fs_terrain/metal/fs_terrain.sc.bin.h>
+#include <fs_terrain/glsl/fs_terrain.sc.bin.h>
+#include <fs_terrain/essl/fs_terrain.sc.bin.h>
+
 namespace
 {
 	const bgfx::EmbeddedShader s_embeddedShaders[] =
@@ -109,6 +118,8 @@ namespace
 		BGFX_EMBEDDED_SHADER(fs_tex2),
 		BGFX_EMBEDDED_SHADER(vs_tex_mlit),
 		BGFX_EMBEDDED_SHADER(fs_tex_mlit),
+		BGFX_EMBEDDED_SHADER(vs_terrain),
+		BGFX_EMBEDDED_SHADER(fs_terrain),
 		BGFX_EMBEDDED_SHADER_END()
 	};
 
@@ -181,7 +192,17 @@ bool BgfxBackend::Init(void* windowHandle, int width, int height, bool windowed)
 	s_cached_nwh = windowHandle;
 #endif
 
-	bgfx::setViewRect(0, 0, 0, static_cast<uint16_t>(width), static_cast<uint16_t>(height));
+	{
+		// Phase D part 4 — configure both backbuffer views. kView3D owns
+		// the 3D scene + clear; kView2D is the HUD/menu overlay (sequential
+		// submission order for layered alpha overdraw, no clear).
+		const uint16_t w16 = static_cast<uint16_t>(width);
+		const uint16_t h16 = static_cast<uint16_t>(height);
+		bgfx::setViewRect(kView3D, 0, 0, w16, h16);
+		bgfx::setViewRect(kView2D, 0, 0, w16, h16);
+		bgfx::setViewMode(kView2D, bgfx::ViewMode::Sequential);
+		bgfx::setViewClear(kView2D, BGFX_CLEAR_NONE);
+	}
 
 	const bgfx::RendererType::Enum rendererType = bgfx::getRendererType();
 	fprintf(stderr, "BgfxBackend::Init: %s (%dx%d, %s)\n",
@@ -266,13 +287,31 @@ bool BgfxBackend::Reset(int width, int height, bool windowed)
 	m_height = height;
 	bgfx::reset(static_cast<uint32_t>(width), static_cast<uint32_t>(height),
 	            windowed ? BGFX_RESET_NONE : BGFX_RESET_FULLSCREEN);
-	bgfx::setViewRect(0, 0, 0, static_cast<uint16_t>(width), static_cast<uint16_t>(height));
+	{
+		// ViewMode and ClearMask survive bgfx::reset, so only re-issue rects.
+		const uint16_t w16 = static_cast<uint16_t>(width);
+		const uint16_t h16 = static_cast<uint16_t>(height);
+		bgfx::setViewRect(kView3D, 0, 0, w16, h16);
+		bgfx::setViewRect(kView2D, 0, 0, w16, h16);
+	}
 	return true;
 }
 
 void BgfxBackend::Begin_Scene()
 {
-	bgfx::touch(m_currentView);
+	// Touch both backbuffer views so they always render even with zero
+	// submits — guards against frames where the HUD is hidden producing a
+	// stale 2D layer, and against frames with no 3D content (loading
+	// screens) producing no clear.
+	if (m_currentView == 0)
+	{
+		bgfx::touch(kView3D);
+		bgfx::touch(kView2D);
+	}
+	else
+	{
+		bgfx::touch(m_currentView);
+	}
 }
 
 void BgfxBackend::End_Scene(bool flip)
@@ -300,7 +339,13 @@ void BgfxBackend::Clear(bool color, bool depth, const Vector4& clearColor, float
 	uint8_t a = static_cast<uint8_t>(clearColor.W * 255.0f);
 	uint32_t rgba = (uint32_t(r) << 24) | (uint32_t(g) << 16) | (uint32_t(b) << 8) | uint32_t(a);
 
-	bgfx::setViewClear(m_currentView, flags, rgba, z, 0);
+	// kView3D owns the backbuffer color/depth clear; kView2D was set to
+	// BGFX_CLEAR_NONE in Init so it never clears (alpha-blends over 3D).
+	// When an RT is bound, that RT's view does the clear.
+	if (m_currentView == 0)
+		bgfx::setViewClear(kView3D, flags, rgba, z, 0);
+	else
+		bgfx::setViewClear(m_currentView, flags, rgba, z, 0);
 }
 
 // --- Phase 5g — IRenderBackend production path -------------------------------
@@ -365,11 +410,12 @@ uint64_t BuildStateMask(const ShaderStateDesc& s)
 	if (s.colorWrite) state |= BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A;
 	if (s.depthWrite) state |= BGFX_STATE_WRITE_Z;
 	state |= TranslateDepthCmp(s.depthCmp);
-	// Phase-debug: temporarily disable culling so we can see both triangles of
-	// any 2D quad. Render2D's default shader doesn't explicitly set cull-mode;
-	// rely on the game shader setting CULL_MODE_DISABLE for double-sided draws.
-	// if (s.cullEnable) state |= BGFX_STATE_CULL_CCW;
-	(void)s.cullEnable;
+	// EA's W3D pipeline uses D3D's clockwise = front winding. bgfx's
+	// default is CCW = front, so without an explicit BGFX_STATE_CULL_CW
+	// every 3D triangle gets back-face culled. Render2D quads with
+	// CULL_MODE_DISABLE on their shader skip via the (cullEnable) gate.
+	if (s.cullEnable)
+		state |= BGFX_STATE_CULL_CW;
 	// Blend: only encode when not the opaque default (ONE / ZERO).
 	if (!(s.srcBlend == ShaderStateDesc::BLEND_ONE && s.dstBlend == ShaderStateDesc::BLEND_ZERO))
 	{
@@ -436,6 +482,9 @@ void BgfxBackend::InitPipelineResources()
 	m_progTex2   = bgfx::createProgram(
 		bgfx::createEmbeddedShader(s_embeddedShaders, t, "vs_tex2"),
 		bgfx::createEmbeddedShader(s_embeddedShaders, t, "fs_tex2"), true);
+	m_progTerrain = bgfx::createProgram(
+		bgfx::createEmbeddedShader(s_embeddedShaders, t, "vs_terrain"),
+		bgfx::createEmbeddedShader(s_embeddedShaders, t, "fs_terrain"), true);
 
 	m_uSolidColor    = bgfx::createUniform("u_solidColor",    bgfx::UniformType::Vec4);
 	m_uSampler       = bgfx::createUniform("s_texture",       bgfx::UniformType::Sampler);
@@ -449,6 +498,10 @@ void BgfxBackend::InitPipelineResources()
 	m_uCutoutRef     = bgfx::createUniform("u_cutoutRef",     bgfx::UniformType::Vec4);
 	m_uFogColor      = bgfx::createUniform("u_fogColor",      bgfx::UniformType::Vec4);
 	m_uFogRange      = bgfx::createUniform("u_fogRange",      bgfx::UniformType::Vec4);
+	// Phase D6 — terrain cloud / lightmap overlay (stages 2/3 + uv params).
+	m_uSampler2      = bgfx::createUniform("s_texture2",      bgfx::UniformType::Sampler);
+	m_uSampler3      = bgfx::createUniform("s_texture3",      bgfx::UniformType::Sampler);
+	m_uCloudParams   = bgfx::createUniform("u_cloudParams",   bgfx::UniformType::Vec4);
 
 	// 2×2 white placeholder so the textured/lit programs have something to
 	// sample until Phase 5i brings real texture upload.
@@ -485,7 +538,10 @@ void BgfxBackend::DestroyPipelineResources()
 	}
 	m_renderTargets.clear();
 	m_currentView = 0;
-	m_nextViewId  = 1;
+	m_nextViewId  = 2;            // kView2D = 1 reserved
+	m_active2D    = false;
+	m_view3DDirty = true;
+	m_view2DDirty = true;
 
 	// Free any user-owned textures that weren't released via Destroy_Texture.
 	for (auto* owned : m_ownedTextures)
@@ -509,6 +565,7 @@ void BgfxBackend::DestroyPipelineResources()
 	if (bgfx::isValid(m_progTex))            bgfx::destroy(m_progTex);
 	if (bgfx::isValid(m_progTexMLit))        bgfx::destroy(m_progTexMLit);
 	if (bgfx::isValid(m_progTex2))           bgfx::destroy(m_progTex2);
+	if (bgfx::isValid(m_progTerrain))        bgfx::destroy(m_progTerrain);
 	if (bgfx::isValid(m_uSolidColor))        bgfx::destroy(m_uSolidColor);
 	if (bgfx::isValid(m_uSampler))           bgfx::destroy(m_uSampler);
 	if (bgfx::isValid(m_uSampler1))          bgfx::destroy(m_uSampler1);
@@ -521,14 +578,22 @@ void BgfxBackend::DestroyPipelineResources()
 	if (bgfx::isValid(m_uCutoutRef))          bgfx::destroy(m_uCutoutRef);
 	if (bgfx::isValid(m_uFogColor))           bgfx::destroy(m_uFogColor);
 	if (bgfx::isValid(m_uFogRange))           bgfx::destroy(m_uFogRange);
+	if (bgfx::isValid(m_uSampler2))           bgfx::destroy(m_uSampler2);
+	if (bgfx::isValid(m_uSampler3))           bgfx::destroy(m_uSampler3);
+	if (bgfx::isValid(m_uCloudParams))        bgfx::destroy(m_uCloudParams);
 	if (bgfx::isValid(m_placeholderTexture)) bgfx::destroy(m_placeholderTexture);
 	if (bgfx::isValid(m_currentVB))          bgfx::destroy(m_currentVB);
 	if (bgfx::isValid(m_currentIB))          bgfx::destroy(m_currentIB);
 	m_progSolid = m_progVColor = m_progTex = m_progTexMLit = m_progTex2 = BGFX_INVALID_HANDLE;
+	m_progTerrain = BGFX_INVALID_HANDLE;
+	m_terrainPassActive = false;
 	m_uSolidColor = m_uSampler = m_uSampler1 = BGFX_INVALID_HANDLE;
 	m_uLightDirArr = m_uLightColorArr = m_uLightPosArr = m_uLightSpotArr = BGFX_INVALID_HANDLE;
 	m_uLightSpecArr = m_uMaterialSpec = m_uCutoutRef = BGFX_INVALID_HANDLE;
 	m_uFogColor = m_uFogRange = BGFX_INVALID_HANDLE;
+	m_uSampler2 = m_uSampler3 = m_uCloudParams = BGFX_INVALID_HANDLE;
+	m_terrainCloudParams[0] = m_terrainCloudParams[1] = 0.f;
+	m_terrainCloudParams[2] = m_terrainCloudParams[3] = 0.f;
 	m_placeholderTexture = BGFX_INVALID_HANDLE;
 	m_currentVB = BGFX_INVALID_HANDLE;
 	m_currentIB = BGFX_INVALID_HANDLE;
@@ -542,14 +607,42 @@ void BgfxBackend::Set_World_Transform(const float m[16])
 
 void BgfxBackend::Set_View_Transform(const float m[16])
 {
-	std::memcpy(m_viewMtx, m, sizeof(m_viewMtx));
-	m_viewProjDirty = true;
+	if (m_active2D) {
+		std::memcpy(m_view2DMtx, m, sizeof(m_view2DMtx));
+		m_view2DDirty = true;
+	} else {
+		std::memcpy(m_view3DMtx, m, sizeof(m_view3DMtx));
+		m_view3DDirty = true;
+	}
 }
 
 void BgfxBackend::Set_Projection_Transform(const float m[16])
 {
-	std::memcpy(m_projMtx, m, sizeof(m_projMtx));
-	m_viewProjDirty = true;
+	// proj[15]==1 → ortho or identity (Render2DClass uses both as 2D);
+	// proj[15]==0 → perspective. The DX8 apply order is
+	// WORLD → VIEW → PROJECTION and Render2DClass also pushes VIEW
+	// before PROJECTION — the latch is current by the time
+	// ApplyDrawState consumes it.
+	const bool prevActive2D = m_active2D;
+	m_active2D = (fabsf(m[15] - 1.0f) < 1e-4f);
+
+	if (m_active2D) {
+		std::memcpy(m_proj2DMtx, m, sizeof(m_proj2DMtx));
+		m_view2DDirty = true;
+		// Mode flipped this Apply pass: the VIEW that arrived just
+		// before this PROJECTION landed in m_view3DMtx (because
+		// m_active2D was still false). Pull it into the 2D slot so
+		// the upcoming submit uses paired view+proj.
+		if (!prevActive2D) {
+			std::memcpy(m_view2DMtx, m_view3DMtx, sizeof(m_view2DMtx));
+		}
+	} else {
+		std::memcpy(m_proj3DMtx, m, sizeof(m_proj3DMtx));
+		m_view3DDirty = true;
+		if (prevActive2D) {
+			std::memcpy(m_view3DMtx, m_view2DMtx, sizeof(m_view3DMtx));
+		}
+	}
 }
 
 void BgfxBackend::Set_Shader(const ShaderStateDesc& shader)
@@ -809,18 +902,20 @@ void BgfxBackend::Set_Sampler_State(unsigned stage, const SamplerStateDesc& samp
 
 void BgfxBackend::UpdateViewOrder()
 {
-	// Default bgfx view order is ascending view ID. We need RTs (views 1..N)
-	// to submit before the backbuffer (view 0) every frame, otherwise the
-	// backbuffer pass sampling an RT reads a stale frame. Explicit order:
-	// [1, 2, ..., N, 0].
+	// Default bgfx view order is ascending view ID. RTs (views 2..N) must
+	// submit before the backbuffer views (kView3D=0, kView2D=1) so that any
+	// backbuffer pass sampling an RT reads the freshly rendered frame.
+	// Explicit order: [2, 3, ..., N, kView3D, kView2D]. The 2D HUD view
+	// always draws last so it overlays the 3D scene.
 	if (m_renderTargets.empty())
 		return;
-	const size_t count = m_renderTargets.size() + 1;
+	const size_t count = m_renderTargets.size() + 2;   // +1 for kView3D, +1 for kView2D
 	std::vector<bgfx::ViewId> order;
 	order.reserve(count);
 	for (auto* rt : m_renderTargets)
 		order.push_back(rt->viewId);
-	order.push_back(0);
+	order.push_back(kView3D);
+	order.push_back(kView2D);
 	bgfx::setViewOrder(0, static_cast<uint16_t>(count), order.data());
 }
 
@@ -909,10 +1004,11 @@ void BgfxBackend::Set_Render_Target(uintptr_t handle)
 		auto* target = reinterpret_cast<BgfxRenderTarget*>(handle);
 		m_currentView = target->viewId;
 	}
-	// The new view hasn't had its view-proj uploaded this frame; force the
-	// next ApplyDrawState to resend setViewTransform for whichever view is
-	// now active.
-	m_viewProjDirty = true;
+	// The new view (RT or backbuffer-3D) hasn't had its view-proj uploaded
+	// this frame; force the next ApplyDrawState to re-emit setViewTransform
+	// for whichever target view ends up being chosen.
+	m_view3DDirty = true;
+	m_view2DDirty = true;
 }
 
 uintptr_t BgfxBackend::Get_Render_Target_Texture(uintptr_t handle)
@@ -1088,16 +1184,26 @@ static bgfx::ProgramHandle SelectProgram(uint32_t attrMask,
                                          const ShaderStateDesc& shader,
                                          const MaterialDesc& material,
                                          bool hasStage1,
+                                         bool terrainPassActive,
                                          bgfx::ProgramHandle solid,
                                          bgfx::ProgramHandle vcolor,
                                          bgfx::ProgramHandle tex,
                                          bgfx::ProgramHandle texMLit,
-                                         bgfx::ProgramHandle tex2)
+                                         bgfx::ProgramHandle tex2,
+                                         bgfx::ProgramHandle terrain)
 {
 	const bool hasNormal = (attrMask & (1u << VertexAttributeDesc::SEM_NORMAL))    != 0;
 	const bool hasColor0 = (attrMask & (1u << VertexAttributeDesc::SEM_COLOR0))    != 0;
 	const bool hasUV0    = (attrMask & (1u << VertexAttributeDesc::SEM_TEXCOORD0)) != 0;
 	const bool hasUV1    = (attrMask & (1u << VertexAttributeDesc::SEM_TEXCOORD1)) != 0;
+
+	// Phase D5 — terrain mode wins when the W3DShaderManager BGFX gate has
+	// signalled a terrain draw and the vertex layout actually has both UV
+	// channels and the prelit vColor. The reflection pass and a couple of
+	// other terrain fallbacks may set the flag without UV1 (e.g. wireframe);
+	// fall through to the regular selection in that case.
+	if (terrainPassActive && hasColor0 && hasUV0 && hasUV1 && bgfx::isValid(terrain))
+		return terrain;
 
 	// Phase 5k — two-stage modulate wins over the lit / single-tex paths when
 	// the caller explicitly bound a second texture and supplied a UV1 stream.
@@ -1118,20 +1224,47 @@ static bgfx::ProgramHandle SelectProgram(uint32_t attrMask,
 
 bgfx::ProgramHandle BgfxBackend::ApplyDrawState(uint32_t attrMask)
 {
-	// Phase 5p — m_viewProjDirty is always re-uploaded after a
-	// Set_Render_Target switch (the new view has no transform state), so
-	// the simple "per-frame" invalidation from 5g still works here.
-	if (m_viewProjDirty)
+	// Phase D part 4 — split backbuffer view between 3D and 2D content.
+	// When an RT is bound (m_currentView != 0) the RT owns its own view
+	// ID; both 3D and 2D draws to that RT submit to it (Phase D5+ may
+	// revisit). On the backbuffer we route 3D submits to kView3D and 2D
+	// submits to kView2D so the per-view setViewTransform doesn't collide.
+	uint16_t targetView;
+	if (m_currentView != 0)
 	{
-		bgfx::setViewTransform(m_currentView, m_viewMtx, m_projMtx);
-		m_viewProjDirty = false;
+		targetView = m_currentView;
+		// RTs render 3D content in production today; reuse the 3D dirty
+		// flag to force a re-upload after Set_Render_Target.
+		if (m_view3DDirty) {
+			bgfx::setViewTransform(targetView, m_view3DMtx, m_proj3DMtx);
+			m_view3DDirty = false;
+		}
 	}
+	else if (m_active2D)
+	{
+		targetView = kView2D;
+		if (m_view2DDirty) {
+			bgfx::setViewTransform(targetView, m_view2DMtx, m_proj2DMtx);
+			m_view2DDirty = false;
+		}
+	}
+	else
+	{
+		targetView = kView3D;
+		if (m_view3DDirty) {
+			bgfx::setViewTransform(targetView, m_view3DMtx, m_proj3DMtx);
+			m_view3DDirty = false;
+		}
+	}
+	m_pendingSubmitView = targetView;
+
 	bgfx::setTransform(m_worldMtx);
 
 	const bool hasStage1 = (m_stageTexture[1] != 0);
 	const bgfx::ProgramHandle prog = SelectProgram(
-		attrMask, m_shader, m_material, hasStage1,
-		m_progSolid, m_progVColor, m_progTex, m_progTexMLit, m_progTex2);
+		attrMask, m_shader, m_material, hasStage1, m_terrainPassActive,
+		m_progSolid, m_progVColor, m_progTex, m_progTexMLit, m_progTex2,
+		m_progTerrain);
 
 	// u_solidColor doubles as the "material diffuse × opacity" push for the
 	// unlit solid program. The textured programs read color from the vertex
@@ -1226,7 +1359,8 @@ bgfx::ProgramHandle BgfxBackend::ApplyDrawState(uint32_t attrMask)
 	// for callers that don't use alpha-test (alpha is always >= 0).
 	const bool isTexturedProg = (prog.idx == m_progTex.idx)
 	                         || (prog.idx == m_progTexMLit.idx)
-	                         || (prog.idx == m_progTex2.idx);
+	                         || (prog.idx == m_progTex2.idx)
+	                         || (prog.idx == m_progTerrain.idx);
 	if (isTexturedProg)
 	{
 		const float ar = m_shader.alphaTest ? m_shader.alphaTestRef : 0.0f;
@@ -1271,10 +1405,12 @@ bgfx::ProgramHandle BgfxBackend::ApplyDrawState(uint32_t attrMask)
 		bgfx::setTexture(0, m_uSampler, bound, flags0);
 	}
 
-	// Phase 5k — only the tex2 program declares s_texture1. bgfx validates
-	// sampler bindings against the program; binding to any other program
-	// triggers a warning.
-	if (hasStage1 && prog.idx == m_progTex2.idx)
+	// Phase 5k / D5 — only the two-stage programs (tex2, terrain) declare
+	// s_texture1. bgfx validates sampler bindings against the program;
+	// binding to any other program triggers a warning.
+	const bool needsStage1 = (prog.idx == m_progTex2.idx)
+	                      || (prog.idx == m_progTerrain.idx);
+	if (hasStage1 && needsStage1)
 	{
 		auto* owned = reinterpret_cast<bgfx::TextureHandle*>(m_stageTexture[1]);
 		if (bgfx::isValid(*owned))
@@ -1282,6 +1418,37 @@ bgfx::ProgramHandle BgfxBackend::ApplyDrawState(uint32_t attrMask)
 			const uint32_t flags1 = m_stageSamplerFlags[1] ? m_stageSamplerFlags[1] : UINT32_MAX;
 			bgfx::setTexture(1, m_uSampler1, *owned, flags1);
 		}
+	}
+
+	// Phase D6 — terrain cloud / lightmap overlay. Only m_progTerrain
+	// declares s_texture2 / s_texture3 / u_cloudParams; bind unconditionally
+	// when that program is selected, falling back to the 2×2 white
+	// placeholder so absent variants (BASE / NOISE1-only / NOISE2-only) get
+	// an identity multiply (white = 1.0). The W3DShaderManager BGFX gate
+	// nulls the slots for variants that don't supply the texture.
+	if (prog.idx == m_progTerrain.idx)
+	{
+		bgfx::TextureHandle tex2 = m_placeholderTexture;
+		if (m_stageTexture[2] != 0)
+		{
+			auto* owned = reinterpret_cast<bgfx::TextureHandle*>(m_stageTexture[2]);
+			if (bgfx::isValid(*owned))
+				tex2 = *owned;
+		}
+		const uint32_t flags2 = m_stageSamplerFlags[2] ? m_stageSamplerFlags[2] : UINT32_MAX;
+		bgfx::setTexture(2, m_uSampler2, tex2, flags2);
+
+		bgfx::TextureHandle tex3 = m_placeholderTexture;
+		if (m_stageTexture[3] != 0)
+		{
+			auto* owned = reinterpret_cast<bgfx::TextureHandle*>(m_stageTexture[3]);
+			if (bgfx::isValid(*owned))
+				tex3 = *owned;
+		}
+		const uint32_t flags3 = m_stageSamplerFlags[3] ? m_stageSamplerFlags[3] : UINT32_MAX;
+		bgfx::setTexture(3, m_uSampler3, tex3, flags3);
+
+		bgfx::setUniform(m_uCloudParams, m_terrainCloudParams);
 	}
 
 	bgfx::setState(BuildStateMask(m_shader));
@@ -1300,7 +1467,7 @@ void BgfxBackend::Draw_Indexed(unsigned /*minVertexIndex*/,
 	const bgfx::ProgramHandle prog = ApplyDrawState(m_vbAttrMask);
 	bgfx::setVertexBuffer(0, m_currentVB);
 	bgfx::setIndexBuffer(m_currentIB, startIndex, primitiveCount * 3);
-	bgfx::submit(m_currentView, prog);
+	bgfx::submit(m_pendingSubmitView, prog);
 }
 
 void BgfxBackend::Draw(unsigned startVertex, unsigned primitiveCount)
@@ -1310,7 +1477,7 @@ void BgfxBackend::Draw(unsigned startVertex, unsigned primitiveCount)
 
 	const bgfx::ProgramHandle prog = ApplyDrawState(m_vbAttrMask);
 	bgfx::setVertexBuffer(0, m_currentVB, startVertex, primitiveCount * 3);
-	bgfx::submit(m_currentView, prog);
+	bgfx::submit(m_pendingSubmitView, prog);
 }
 
 void BgfxBackend::Draw_Triangles_Dynamic(const void* verts,
@@ -1359,7 +1526,7 @@ void BgfxBackend::Draw_Triangles_Dynamic(const void* verts,
 	bgfx::setVertexBuffer(0, &tvb);
 	if (indexed)
 		bgfx::setIndexBuffer(&tib);
-	bgfx::submit(m_currentView, prog);
+	bgfx::submit(m_pendingSubmitView, prog);
 }
 
 // --- Phase 5e smoke triangle -------------------------------------------------

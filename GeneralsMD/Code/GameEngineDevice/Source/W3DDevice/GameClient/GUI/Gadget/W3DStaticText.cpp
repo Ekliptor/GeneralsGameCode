@@ -94,7 +94,14 @@ static void drawStaticTextText( GameWindow *window, WinInstanceData *instData,
 	wordWrap = size.x - 10;
 	//if(wordWrap == 89)
 	//	wordWrap = 95;
-	text->setWordWrap(wordWrap);
+	// probe unwrapped extent first; only enable wrapping if the text
+	// genuinely overflows the widget. without this, HiDPI-boosted fonts
+	// (see docs/HiDPI-Font-Readability.md) trigger mid-word wraps inside
+	// labels authored to fit on one line at the original 800x600 design.
+	text->setWordWrap(0);
+	text->getSize(&textWidth, &textHeight);
+	if (wordWrap > 0 && textWidth > wordWrap)
+		text->setWordWrap(wordWrap);
 	if( BitIsSet(window->winGetStatus(), WIN_STATUS_WRAP_CENTERED)		)
 		text->setWordWrapCentered(TRUE);
 	else

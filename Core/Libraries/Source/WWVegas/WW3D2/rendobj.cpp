@@ -74,8 +74,11 @@
 
 #include "rendobj.h"
 
-#ifdef RTS_RENDERER_DX8
-
+// Phase 0 (BGFX scene wireup): every method below is device-independent —
+// pure scene-graph, transform math, container traversal, persist factory.
+// No DX8 calls. Compiled in both DX8 and BGFX modes so the BGFX build
+// gets a real RenderObjClass::Add (was a no-op stub before, which silently
+// dropped every render object the gameplay code added to a scene).
 #include "assetmgr.h"
 #include "win.h"
 #include "pot.h"
@@ -1316,6 +1319,4 @@ bool RenderObjClass::Load (ChunkLoadClass &cload)
 	WWASSERT(0); // this should never hit with the persist factory we're using.
 	return true;
 }
-
-#endif // RTS_RENDERER_DX8
 

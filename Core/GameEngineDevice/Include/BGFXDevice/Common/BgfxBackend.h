@@ -82,6 +82,25 @@ public:
 
 	const char* Backend_Name() const override { return "bgfx"; }
 
+	// Phase D5 — terrain-pass shader override. Set to true around terrain
+	// submits so SelectProgram uses m_progTerrain (base atlas + alpha-edge
+	// mix), false otherwise. Cheaper than expanding ShaderStateDesc with a
+	// "shader-class hint" field since terrain is currently the only caller
+	// that needs a non-uber program.
+	void Set_Terrain_Pass_Active(bool on) override { m_terrainPassActive = on; }
+
+	// Phase D6 — cloud / lightmap overlay parameters. Pushed into
+	// u_cloudParams (xy = animated cloud offset, z = STRETCH_FACTOR) on
+	// every terrain draw; consumed in the vertex shader to project
+	// world-space XY into the cloud / lightmap atlases.
+	void Set_Terrain_Cloud_Params(float xOffset, float yOffset, float stretch) override
+	{
+		m_terrainCloudParams[0] = xOffset;
+		m_terrainCloudParams[1] = yOffset;
+		m_terrainCloudParams[2] = stretch;
+		m_terrainCloudParams[3] = 0.0f;
+	}
+
 	// Smoke-test entry points from Phase 5e/5f. Each lazy-initializes its own
 	// program/layout/textures, submits one primitive at a hardcoded NDC
 	// quadrant, and releases resources in Shutdown(). Not part of
@@ -165,6 +184,7 @@ private:
 	bgfx::ProgramHandle m_progTex     = BGFX_INVALID_HANDLE;
 	bgfx::ProgramHandle m_progTexMLit = BGFX_INVALID_HANDLE;  // Phase 5l: N-slot directional lighting
 	bgfx::ProgramHandle m_progTex2    = BGFX_INVALID_HANDLE;  // Phase 5k: two-stage modulate
+	bgfx::ProgramHandle m_progTerrain = BGFX_INVALID_HANDLE;  // Phase D5: base atlas + alpha-edge mix * vColor
 
 	// Shared uniforms (one-time allocation on init).
 	bgfx::UniformHandle m_uSolidColor    = BGFX_INVALID_HANDLE;
@@ -179,6 +199,9 @@ private:
 	bgfx::UniformHandle m_uCutoutRef     = BGFX_INVALID_HANDLE;  // Phase 5n: .x = cutout threshold (u_cutoutRef)
 	bgfx::UniformHandle m_uFogColor      = BGFX_INVALID_HANDLE;  // Phase 5o: rgb fog color
 	bgfx::UniformHandle m_uFogRange      = BGFX_INVALID_HANDLE;  // Phase 5o: .x=start, .y=end, .z=enable
+	bgfx::UniformHandle m_uSampler2      = BGFX_INVALID_HANDLE;  // Phase D6: stage-2 sampler (cloud)
+	bgfx::UniformHandle m_uSampler3      = BGFX_INVALID_HANDLE;  // Phase D6: stage-3 sampler (lightmap/noise)
+	bgfx::UniformHandle m_uCloudParams   = BGFX_INVALID_HANDLE;  // Phase D6: .xy=(xOff,yOff), .z=STRETCH_FACTOR
 
 	// 2×2 white placeholder — bound by default and by Set_Texture until
 	// real TextureBaseClass ↔ bgfx integration lands in Phase 5i.
@@ -187,11 +210,36 @@ private:
 	// Cached descriptor state.
 	float m_worldMtx[16] = {
 		1.f,0.f,0.f,0.f, 0.f,1.f,0.f,0.f, 0.f,0.f,1.f,0.f, 0.f,0.f,0.f,1.f };
-	float m_viewMtx[16]  = {
+
+	// Phase D part 4 — split per-mode (3D vs 2D) view+proj caches.
+	// bgfx::setViewTransform is per-view: the LAST upload before
+	// bgfx::frame() applies to ALL submits to that view ID. Routing 3D to
+	// kView3D and 2D to kView2D keeps them independent so the 2D HUD's
+	// identity/ortho transform doesn't overwrite the 3D camera.
+	static constexpr uint16_t kView3D = 0;   // backbuffer 3D scene
+	static constexpr uint16_t kView2D = 1;   // backbuffer 2D HUD/menu overlay
+	float m_view3DMtx[16] = {
 		1.f,0.f,0.f,0.f, 0.f,1.f,0.f,0.f, 0.f,0.f,1.f,0.f, 0.f,0.f,0.f,1.f };
-	float m_projMtx[16]  = {
+	float m_proj3DMtx[16] = {
 		1.f,0.f,0.f,0.f, 0.f,1.f,0.f,0.f, 0.f,0.f,1.f,0.f, 0.f,0.f,0.f,1.f };
-	bool m_viewProjDirty = true;
+	float m_view2DMtx[16] = {
+		1.f,0.f,0.f,0.f, 0.f,1.f,0.f,0.f, 0.f,0.f,1.f,0.f, 0.f,0.f,0.f,1.f };
+	float m_proj2DMtx[16] = {
+		1.f,0.f,0.f,0.f, 0.f,1.f,0.f,0.f, 0.f,0.f,1.f,0.f, 0.f,0.f,0.f,1.f };
+	bool m_view3DDirty = true;
+	bool m_view2DDirty = true;
+	bool m_active2D    = false;        // latched by Set_Projection_Transform
+	uint16_t m_pendingSubmitView = 0;  // set by ApplyDrawState; read by submit sites
+
+	// Phase D5 — set/cleared by W3DShaderManager around terrain draws.
+	// SelectProgram routes to m_progTerrain when this is true and the
+	// vertex layout has the required attributes (Color0 + UV0 + UV1).
+	bool m_terrainPassActive = false;
+
+	// Phase D6 — terrain cloud / lightmap state, populated by the
+	// W3DShaderManager BGFX gate via Set_Terrain_Cloud_Params and pushed as
+	// u_cloudParams whenever m_progTerrain is the selected program.
+	float m_terrainCloudParams[4] = { 0.f, 0.f, 0.f, 0.f };
 
 	ShaderStateDesc m_shader;
 	MaterialDesc m_material;
@@ -232,14 +280,16 @@ private:
 	// didn't actually carry a mip chain.
 	std::unordered_map<uintptr_t, uint8_t> m_textureMipCounts;
 
-	static constexpr unsigned kMaxTextureStages = 2;
-	uintptr_t m_stageTexture[kMaxTextureStages] = { 0, 0 };
+	// Phase D6 — bumped 2 → 4 to hold cloud (stage 2) and lightmap (stage 3)
+	// alongside the existing base diffuse (stage 0) and alpha-edge (stage 1).
+	static constexpr unsigned kMaxTextureStages = 4;
+	uintptr_t m_stageTexture[kMaxTextureStages] = { 0, 0, 0, 0 };
 
 	// Phase 5h.34 — per-stage sampler flags in bgfx's native format. Computed
 	// once per Set_Sampler_State call and OR-ed into `setTexture` at submit
 	// time. Default is "bilinear + wrap" which matches the filter/addr
 	// defaults used before 5h.34.
-	uint32_t  m_stageSamplerFlags[kMaxTextureStages] = { 0, 0 };
+	uint32_t  m_stageSamplerFlags[kMaxTextureStages] = { 0, 0, 0, 0 };
 
 	// Phase 5p — off-screen render targets. Each RT owns a bgfx FrameBuffer
 	// and a dedicated view ID; the backbuffer keeps view 0. Inside
@@ -260,8 +310,8 @@ private:
 		uint16_t                height   = 0;
 	};
 	std::vector<BgfxRenderTarget*> m_renderTargets;
-	uint16_t m_currentView = 0;   // 0 == backbuffer
-	uint16_t m_nextViewId  = 1;   // view IDs handed to new RTs
+	uint16_t m_currentView = 0;   // 0 == backbuffer-3D when no RT bound
+	uint16_t m_nextViewId  = 2;   // RTs allocate from 2 (kView2D=1 reserved)
 
 	void UpdateViewOrder();
 };

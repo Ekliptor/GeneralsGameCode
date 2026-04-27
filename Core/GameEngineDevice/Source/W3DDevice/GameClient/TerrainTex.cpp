@@ -46,12 +46,17 @@
 //         Includes
 //-----------------------------------------------------------------------------
 #include <stdlib.h>
+#include <vector>
 
 #include "W3DDevice/GameClient/TerrainTex.h"
 #include "W3DDevice/GameClient/WorldHeightMap.h"
 #include "W3DDevice/GameClient/TileData.h"
 #include "Common/GlobalData.h"
 #include "WW3D2/dx8wrapper.h"
+#ifndef RTS_RENDERER_DX8
+#include "WW3D2/IRenderBackend.h"
+#include "WW3D2/RenderBackendRuntime.h"
+#endif
 
 /******************************************************************************
 						TerrainTextureClass
@@ -94,6 +99,82 @@ TerrainTextureClass::TerrainTextureClass(int height, int width) :
 //=============================================================================
 int TerrainTextureClass::update(WorldHeightMap *htMap)
 {
+#ifndef RTS_RENDERER_DX8
+	// Phase D part 3 — bgfx path. The DX8 path below uses
+	// Peek_D3D_Texture()->GetSurfaceLevel + LockRect, which returns null in
+	// bgfx mode (no D3D device). Build the same tile mosaic in a CPU staging
+	// buffer in RGBA8 and upload via IRenderBackend::Update_Texture_RGBA8.
+	// The bgfx texture handle was allocated in the TextureClass(width, height,
+	// ...) ctor (texture.cpp:526) via Create_Texture_RGBA8(nullptr, ...).
+	const int width  = Get_Width();
+	const int height = Get_Height();
+	if (width < TEXTURE_WIDTH || height <= 0) return 0;
+
+	const uintptr_t bgfxHandle = Peek_Bgfx_Handle();
+	IRenderBackend* backend = RenderBackendRuntime::Get_Active();
+	if (bgfxHandle == 0 || backend == nullptr) return 0;
+
+	const Int pixelBytes = 4; // RGBA8
+	const Int rowBytes = width * pixelBytes;
+	std::vector<UnsignedByte> staging(static_cast<size_t>(height) * rowBytes, 0);
+	UnsignedByte* base = staging.data();
+
+	const Int tilePixelExtent = TILE_PIXEL_EXTENT;
+	for (Int tileNdx = 0; tileNdx < htMap->m_numBitmapTiles; tileNdx++) {
+		TileData* pTile = htMap->getSourceTile(tileNdx);
+		if (!pTile) continue;
+		ICoord2D position = pTile->m_tileLocationInTexture;
+		if (position.x <= 0) continue;
+
+		for (Int j = 0; j < tilePixelExtent; j++) {
+			UnsignedByte* pBGR = pTile->getRGBDataForWidth(tilePixelExtent);
+			pBGR += (tilePixelExtent - 1 - j) * TILE_BYTES_PER_PIXEL * tilePixelExtent;
+			const Int row = position.y + j;
+			UnsignedByte* dst = base + row * rowBytes + position.x * pixelBytes;
+			for (Int i = 0; i < tilePixelExtent; i++) {
+				// Source TileData is BGR(A); RGBA8 wants R,G,B,A in memory.
+				dst[0] = pBGR[2];
+				dst[1] = pBGR[1];
+				dst[2] = pBGR[0];
+				dst[3] = 255;
+				dst += pixelBytes;
+				pBGR += TILE_BYTES_PER_PIXEL;
+			}
+		}
+	}
+
+	// 4-pixel border duplication around each tile class — same wrapping logic
+	// the DX8 path uses to avoid bilinear bleed across tile boundaries.
+	for (Int texClass = 0; texClass < htMap->m_numTextureClasses; texClass++) {
+		Int classWidth = htMap->m_textureClasses[texClass].width;
+		ICoord2D origin = htMap->m_textureClasses[texClass].positionInTexture;
+		if (origin.x <= 0) continue;
+		classWidth *= TILE_PIXEL_EXTENT;
+
+		for (Int j = 0; j < classWidth; j++) {
+			const Int row = origin.y + j;
+			UnsignedByte* dst = base + row * rowBytes + origin.x * pixelBytes;
+			memcpy(dst - 4 * pixelBytes, dst + (classWidth - 4) * pixelBytes, 4 * pixelBytes);
+			memcpy(dst + classWidth * pixelBytes, dst, 4 * pixelBytes);
+		}
+
+		for (Int j = 0; j < 4; j++) {
+			Int row = origin.y - j - 1;
+			UnsignedByte* dstBefore = base + row * rowBytes + (origin.x - 4) * pixelBytes;
+			memcpy(dstBefore, dstBefore + classWidth * rowBytes, (classWidth + 8) * pixelBytes);
+
+			row = origin.y + j;
+			UnsignedByte* dstAfter = base + row * rowBytes + (origin.x - 4) * pixelBytes;
+			memcpy(dstAfter + classWidth * rowBytes, dstAfter, (classWidth + 8) * pixelBytes);
+		}
+	}
+
+	backend->Update_Texture_RGBA8(bgfxHandle,
+	                              staging.data(),
+	                              static_cast<uint16_t>(width),
+	                              static_cast<uint16_t>(height));
+	return height;
+#else
 	// D3DTexture is our texture;
 
 	IDirect3DSurface8 *surface_level;
@@ -199,6 +280,7 @@ int TerrainTextureClass::update(WorldHeightMap *htMap)
 		Peek_D3D_Texture()->SetLOD(WW3D::Get_Texture_Reduction());
 	}
 	return(surface_desc.Height);
+#endif // RTS_RENDERER_DX8
 }
 
 #if 0 // old version.
@@ -765,6 +847,61 @@ int AlphaEdgeTextureClass::update256(WorldHeightMap *htMap)
 
 int AlphaEdgeTextureClass::update(WorldHeightMap *htMap)
 {
+#ifndef RTS_RENDERER_DX8
+	// Phase D part 3 — bgfx path. See TerrainTextureClass::update for details.
+	// AlphaEdge is RGBA with a synthesized alpha channel computed from the
+	// source-tile RGB (transparent for white, semi-transparent for black,
+	// opaque otherwise) — used to blend tile edges over the base terrain.
+	const int width  = Get_Width();
+	const int height = Get_Height();
+	if (width <= 0 || height <= 0) return 0;
+
+	const uintptr_t bgfxHandle = Peek_Bgfx_Handle();
+	IRenderBackend* backend = RenderBackendRuntime::Get_Active();
+	if (bgfxHandle == 0 || backend == nullptr) return 0;
+
+	const Int pixelBytes = 4; // RGBA8
+	const Int rowBytes = width * pixelBytes;
+	std::vector<UnsignedByte> staging(static_cast<size_t>(height) * rowBytes, 0);
+	UnsignedByte* base = staging.data();
+
+	const Int tilePixelExtent = TILE_PIXEL_EXTENT;
+	for (Int tileNdx = 0; tileNdx < htMap->m_numEdgeTiles; tileNdx++) {
+		TileData* pTile = htMap->getEdgeTile(tileNdx);
+		if (!pTile) continue;
+		ICoord2D position = pTile->m_tileLocationInTexture;
+		if (position.x <= 0) continue;
+
+		for (Int j = 0; j < tilePixelExtent; j++) {
+			UnsignedByte* pBGR = pTile->getRGBDataForWidth(tilePixelExtent);
+			pBGR += (tilePixelExtent - 1 - j) * TILE_BYTES_PER_PIXEL * tilePixelExtent;
+			const Int row = position.y + j;
+			UnsignedByte* dst = base + row * rowBytes + position.x * pixelBytes;
+			for (Int i = 0; i < tilePixelExtent; i++) {
+				const UnsignedByte b = pBGR[0];
+				const UnsignedByte g = pBGR[1];
+				const UnsignedByte r = pBGR[2];
+				dst[0] = r;
+				dst[1] = g;
+				dst[2] = b;
+				if (b == 0 && g == 0 && r == 0)
+					dst[3] = 0x80;
+				else if (b == 0xff && g == 0xff && r == 0xff)
+					dst[3] = 0x00;
+				else
+					dst[3] = 0xff;
+				dst += pixelBytes;
+				pBGR += TILE_BYTES_PER_PIXEL;
+			}
+		}
+	}
+
+	backend->Update_Texture_RGBA8(bgfxHandle,
+	                              staging.data(),
+	                              static_cast<uint16_t>(width),
+	                              static_cast<uint16_t>(height));
+	return height;
+#else
 	// D3DTexture is our texture;
 
 	IDirect3DSurface8 *surface_level;
@@ -835,6 +972,7 @@ int AlphaEdgeTextureClass::update(WorldHeightMap *htMap)
 	surface_level->Release();
 	DX8Wrapper::Generate_Mipmaps(Peek_D3D_Texture());
 	return(surface_desc.Height);
+#endif // RTS_RENDERER_DX8
 }
 
 void AlphaEdgeTextureClass::Apply(unsigned int stage)

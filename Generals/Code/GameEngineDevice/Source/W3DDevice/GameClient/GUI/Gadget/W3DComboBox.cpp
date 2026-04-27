@@ -126,6 +126,16 @@ void W3DGadgetComboBoxDraw( GameWindow *window, WinInstanceData *instData )
 		if( title->getFont() != window->winGetFont() )
 			title->setFont( window->winGetFont() );
 
+		// confine the closed-state title glyphs to this gadget's authored rect.
+		// without this, HiDPI-boosted descenders (see docs/HiDPI-Font-Readability.md)
+		// spill into the next stacked combo box and visually merge with its title.
+		IRegion2D titleClip;
+		titleClip.lo.x = x;
+		titleClip.lo.y = y;
+		titleClip.hi.x = x + size.x;
+		titleClip.hi.y = y + size.y;
+		title->setClipRegion( &titleClip );
+
 		// draw the text
 		title->draw( x + 1, y, titleColor, titleBorder );
 
@@ -209,6 +219,16 @@ void W3DGadgetComboBoxImageDraw( GameWindow *window, WinInstanceData *instData )
 		// set font to font of the window if not already
 		if( title->getFont() != window->winGetFont() )
 			title->setFont( window->winGetFont() );
+
+		// confine the closed-state title glyphs to this gadget's authored rect.
+		// without this, HiDPI-boosted descenders (see docs/HiDPI-Font-Readability.md)
+		// spill into the next stacked combo box and visually merge with its title.
+		IRegion2D titleClip;
+		titleClip.lo.x = x;
+		titleClip.lo.y = y;
+		titleClip.hi.x = x + size.x;
+		titleClip.hi.y = y + size.y;
+		title->setClipRegion( &titleClip );
 
 		// draw the text
 		title->draw( x + 1, y, titleColor, titleBorder );

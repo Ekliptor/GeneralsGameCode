@@ -185,6 +185,23 @@ public:
 	// Identification (for diagnostics / golden-image testing)
 	virtual const char* Backend_Name() const = 0;
 
+	// Phase D5 — terrain shader override. The DX8 multipass terrain renderer
+	// has no analogue under bgfx (per-view setViewTransform / per-submit state
+	// makes per-pass framebuffer-blend changes expensive). Backends that fold
+	// the multi-stage texture pipeline into a single shader use this hint to
+	// switch to the terrain program around HeightMapRenderObjClass::Render.
+	// Default no-op so the DX8 path and other non-bgfx backends ignore it.
+	virtual void Set_Terrain_Pass_Active(bool /*on*/) {}
+
+	// Phase D6 — cloud / lightmap overlay parameters for the terrain shader.
+	// `xOffset`/`yOffset` advance per frame (see W3DShaderManager::updateCloud)
+	// and produce the animated cloud scroll; `stretch` is the
+	// 1/(63·MAP_XY_FACTOR/2) factor that maps world-space tile coordinates
+	// onto the cloud / lightmap atlas. Default no-op so non-bgfx backends
+	// ignore it.
+	virtual void Set_Terrain_Cloud_Params(float /*xOffset*/, float /*yOffset*/,
+	                                      float /*stretch*/) {}
+
 	// Resolution accessors. Backbuffer size is in real pixels; logical
 	// resolution is the game's design space (typically 800×600). Default
 	// implementation returns zeros so backends without HiDPI awareness don't

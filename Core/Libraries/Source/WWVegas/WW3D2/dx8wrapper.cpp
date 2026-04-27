@@ -4739,19 +4739,36 @@ void DX8Wrapper::Apply_Render_State_Changes()
 	IRenderBackend* b = RenderBackendRuntime::Get_Active();
 	if (b == nullptr)
 		return;
+	// EA's Matrix4x4 stores row-major (Row[i] is the i-th row, translation in
+	// Row[0..2][3]). bgfx::setTransform / setViewTransform expect the layout
+	// the DX8 path used after To_D3DMATRIX — i.e., transposed (translation in
+	// the last linear quad m[12..14]). Without this transpose, view/proj
+	// matrices are interpreted as their own transpose and 3D content projects
+	// to a degenerate region.
+	auto transposeTo = [](float dst[16], const Matrix4x4& m) {
+		for (int r = 0; r < 4; ++r)
+			for (int c = 0; c < 4; ++c)
+				dst[c*4 + r] = m[r][c];
+	};
 	if (render_state_changed & WORLD_CHANGED)
 	{
-		b->Set_World_Transform(reinterpret_cast<const float*>(&render_state.world));
+		float t[16];
+		transposeTo(t, render_state.world);
+		b->Set_World_Transform(t);
 		render_state_changed &= ~WORLD_CHANGED;
 	}
 	if (render_state_changed & VIEW_CHANGED)
 	{
-		b->Set_View_Transform(reinterpret_cast<const float*>(&render_state.view));
+		float t[16];
+		transposeTo(t, render_state.view);
+		b->Set_View_Transform(t);
 		render_state_changed &= ~VIEW_CHANGED;
 	}
 	if (render_state_changed & PROJECTION_CHANGED)
 	{
-		b->Set_Projection_Transform(reinterpret_cast<const float*>(&render_state.projection));
+		float t[16];
+		transposeTo(t, render_state.projection);
+		b->Set_Projection_Transform(t);
 		render_state_changed &= ~PROJECTION_CHANGED;
 	}
 

@@ -120,7 +120,11 @@ SimplePersistFactoryClass<T,CHUNKID>::Load(ChunkLoadClass & cload) const
 template<class T, int CHUNKID> void
 SimplePersistFactoryClass<T,CHUNKID>::Save(ChunkSaveClass & csave,PersistClass * obj) const
 {
-	uint32 objptr = (uint32)obj;
+	// 64-bit safe: cast through uintptr_t before truncating to uint32. The
+	// stored pointer is only used as a save/load key, so the truncation is
+	// fine — bittype.h's uint32 used to be `unsigned long` (8 bytes) which
+	// silently absorbed the pointer; making it 4 bytes (D8 fix) exposed it.
+	uint32 objptr = (uint32)(uintptr_t)obj;
 	csave.Begin_Chunk(SIMPLEFACTORY_CHUNKID_OBJPOINTER);
 	csave.Write(&objptr,sizeof(uint32));
 	csave.End_Chunk();

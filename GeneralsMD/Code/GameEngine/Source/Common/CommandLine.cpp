@@ -842,6 +842,27 @@ Int parseShellMap(char *args[], int num)
 	return 2;
 }
 
+// `-skirmish [<mapname>]` — auto-launch a 1v1 skirmish after the shell
+// becomes active. Useful for in-game terrain / lighting / unit verification
+// without driving the menu UI. Optional <mapname> argument selects a
+// specific map; otherwise the first multiplayer map in the cache is used.
+// Skips intros (piggybacks on the same flag trio as -screenshot).
+Int parseSkirmish(char *args[], int num)
+{
+	TheWritableGlobalData->m_autoSkirmish = TRUE;
+	TheWritableGlobalData->m_playIntro  = FALSE;
+	TheWritableGlobalData->m_afterIntro = TRUE;
+	TheWritableGlobalData->m_playSizzle = FALSE;
+	TheWritableGlobalData->m_shellMapOn = FALSE;  // skip the menu shellmap during boot
+	if (num > 1 && args[1] && args[1][0] != '-')
+	{
+		TheWritableGlobalData->m_autoSkirmishMap = args[1];
+		ConvertShortMapPathToLongMapPath(TheWritableGlobalData->m_autoSkirmishMap);
+		return 2;
+	}
+	return 1;
+}
+
 // `-screenshot <path>` — arm a one-shot main-menu screenshot to <path> and
 // skip the EA logo + Sizzle intros so we reach the main menu immediately.
 // The actual capture happens in GameClient::update once the shell is
@@ -1218,6 +1239,7 @@ static CommandLineParam paramsForEngineInit[] =
 {
 	{ "-nologo", parseNoLogo }, // TheSuperHackers @tweak Is now available in Release builds.
 	{ "-screenshot", parseScreenshot },
+	{ "-skirmish", parseSkirmish },
 	{ "-noshellmap", parseNoShellMap },
 	{ "-noShellAnim", parseNoWindowAnimation }, // TheSuperHackers @tweak Is now available in Release builds.
 	{ "-xres", parseXRes },

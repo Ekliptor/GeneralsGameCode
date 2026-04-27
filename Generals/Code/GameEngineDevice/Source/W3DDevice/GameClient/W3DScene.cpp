@@ -1154,11 +1154,13 @@ void RTS3DScene::Customized_Render( RenderInfoClass &rinfo )
 	}
 
 	// only render particles once per frame
+#ifdef RTS_RENDERER_DX8
 	if (terrainObject != nullptr && TheParticleSystemManager != nullptr &&
 		Get_Extra_Pass_Polygon_Mode() == EXTRA_PASS_DISABLE)
 	{
 		TheParticleSystemManager->queueParticleRender();
 	}
+#endif
 }
 
 /**Convert a player index to a color index, we use this because color indices are

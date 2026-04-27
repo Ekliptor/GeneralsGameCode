@@ -133,6 +133,17 @@ static void drawButtonText( GameWindow *window, WinInstanceData *instData )
 		textPos.y = origin.y + (size.y / 2) - (height / 2);
 	}
 
+	// confine glyphs to the button's authored rect so HiDPI-boosted text
+	// (see docs/HiDPI-Font-Readability.md) cannot spill outside the
+	// button image and mislead users into clicking pixels that fall
+	// outside the actual hit-test region.
+	IRegion2D buttonClip;
+	buttonClip.lo.x = origin.x;
+	buttonClip.lo.y = origin.y;
+	buttonClip.hi.x = origin.x + size.x;
+	buttonClip.hi.y = origin.y + size.y;
+	text->setClipRegion( &buttonClip );
+
 	// draw it
 	text->draw( textPos.x, textPos.y, textColor, dropColor );
 

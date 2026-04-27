@@ -367,6 +367,8 @@ public:
 	Bool m_afterIntro;								///< we need to tell the game our intro is done
 	AsciiString m_screenshotPath;			///< -screenshot <path>: when non-empty, GameClient captures one TGA to this path then quits
 	Int m_screenshotCountdownFrames;	///< frames to wait after the shell becomes active before taking the screenshot
+	Bool m_autoSkirmish;							///< -skirmish: when true, GameClient auto-launches a 1v1 skirmish after the shell is active
+	AsciiString m_autoSkirmishMap;		///< optional explicit map for -skirmish; empty = pick first multiplayer map from cache
 	Bool m_allowExitOutOfMovies;			///< flag to allow exit out of movies only after the Intro has played
 
 	Bool m_loadScreenRender;						///< flag to disallow rendering of almost everything during a loadscreen

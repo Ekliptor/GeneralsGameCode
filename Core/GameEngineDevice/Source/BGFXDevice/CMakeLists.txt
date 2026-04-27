@@ -73,6 +73,7 @@ set(BGFX_SHADER_PAIRS
     tex_lit     # Phase 5f: position + normal + vertex color + uv, lit (single directional — smoke tests)
     tex2        # Phase 5k: position + uv0 + uv1, two-stage modulate
     tex_mlit    # Phase 5l: same layout as tex_lit, with 4-slot directional light accumulation
+    terrain     # Phase D5: position + color + uv0 + uv1, base atlas mixed with alpha-edge atlas (modulate by vColor)
 )
 
 set(BGFX_ALL_GENERATED_OUT "")

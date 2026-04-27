@@ -2140,6 +2140,19 @@ void WW3D::Set_Gamma(float gamma,float bright,float contrast,bool calibrate)
 #include "ww3d.h"
 #include "shader.h"
 #include "rddesc.h"
+// Phase A (BGFX scene wireup): extra headers for the new WW3D::Render /
+// Flush / Static_Sort_List bodies copied from the DX8 region.
+#include "camera.h"
+#include "scene.h"
+#include "rinfo.h"
+#include "dx8wrapper.h"
+#include "dx8renderer.h"
+#include "sortingrenderer.h"
+#include "static_sort_list.h"
+#include "wwprofile.h"
+#include "wwmemlog.h"
+#include "wwdebug.h"
+#include "shdlib.h"
 
 // Note: some WW3D statics already live above the DX8 gate (SyncTime,
 // PreviousSyncTime, IsInitted, IsRendering, FrameCount, ThumbnailEnabled).
@@ -2229,9 +2242,108 @@ WW3DErrorType WW3D::End_Render(bool flip_frame)
 	++FrameCount;
 	return WW3D_ERROR_OK;
 }
-void WW3D::Flush(RenderInfoClass&) {}
-WW3DErrorType WW3D::Render(SceneClass*, CameraClass*, bool, bool, const Vector3&) { return WW3D_ERROR_OK; }
-WW3DErrorType WW3D::Render(RenderObjClass&, RenderInfoClass&) { return WW3D_ERROR_OK; }
+// Phase A (BGFX scene wireup): bodies copied from the DX8 region above
+// (:961-1011, :1026-1063, :1085-1093). Every callee is BGFX-available:
+// DX8Wrapper::* are BGFX shims, CameraClass::Apply walks through bgfx
+// view state, TheDX8MeshRenderer.Set_Camera is a header inline,
+// SortingRendererClass::Flush is un-gated. TheDX8MeshRenderer.Flush()
+// and Clear_Pending_Delete_Lists() are still empty stubs (Phase C).
+// SHD_FLUSH expands to nothing because USE_WWSHADE was removed (#596).
+WW3DErrorType WW3D::Render(SceneClass * scene,CameraClass * cam,bool clear,bool clearz,const Vector3 & color)
+{
+	if (!IsInitted) {
+		return(WW3D_ERROR_OK);
+	}
+
+	WWPROFILE("WW3D::Render");
+	WWMEMLOG(MEM_GAMEDATA);
+	WWASSERT(IsInitted);
+	WWASSERT(IsRendering);
+	WWASSERT(scene);
+	WWASSERT(cam);
+
+	cam->On_Frame_Update();
+	RenderInfoClass rinfo(*cam);
+
+	// Apply the camera and viewport (including depth range)
+	cam->Apply();
+
+	// Clear the viewport
+	if (clear || clearz) {
+		DX8Wrapper::Clear(clear, clearz, color);
+	}
+
+	// set the rendering mode
+	switch(scene->Get_Polygon_Mode()) {
+		case SceneClass::POINT:
+			DX8Wrapper::Set_DX8_Render_State(D3DRS_FILLMODE,D3DFILL_POINT);
+			break;
+		case SceneClass::LINE:
+			DX8Wrapper::Set_DX8_Render_State(D3DRS_FILLMODE,D3DFILL_WIREFRAME);
+			break;
+		case SceneClass::FILL:
+			DX8Wrapper::Set_DX8_Render_State(D3DRS_FILLMODE,D3DFILL_SOLID);
+			break;
+	}
+
+	// Set the global ambient light value here.  If the scene is using the LightEnvironment system
+	// this setting will get overridden.
+	DX8Wrapper::Set_Ambient(scene->Get_Ambient_Light());
+
+	// render the scene
+	TheDX8MeshRenderer.Set_Camera(&rinfo.Camera);
+
+	scene->Render(rinfo);
+
+	Flush(rinfo);
+
+	return WW3D_ERROR_OK;
+}
+
+WW3DErrorType WW3D::Render(RenderObjClass & obj, RenderInfoClass & rinfo)
+{
+	if (!IsInitted) {
+		return(WW3D_ERROR_OK);
+	}
+
+	WWPROFILE("WW3D::Render");
+	WWASSERT(IsInitted);
+	WWASSERT(IsRendering);
+
+	{
+		WWPROFILE("On_Frame_Update");
+		rinfo.Camera.On_Frame_Update();
+	}
+
+	// Apply the camera and viewport (including depth range)
+	rinfo.Camera.Apply();
+
+	// set the rendering mode
+	DX8Wrapper::Set_DX8_Render_State(D3DRS_FILLMODE,D3DFILL_SOLID);
+
+	// Install the lighting environment if one is supplied
+	if (rinfo.light_environment != nullptr) {
+		DX8Wrapper::Set_Light_Environment(rinfo.light_environment);
+	}
+
+	// Render the object
+	TheDX8MeshRenderer.Set_Camera(&rinfo.Camera);
+
+	obj.Render(rinfo);
+
+	Flush(rinfo);
+
+	return WW3D_ERROR_OK;
+}
+
+void WW3D::Flush(RenderInfoClass & rinfo)
+{
+	TheDX8MeshRenderer.Flush();                      // empty BGFX stub (Phase C)
+	SHD_FLUSH;                                       // no-op (USE_WWSHADE removed)
+	WW3D::Render_And_Clear_Static_Sort_Lists(rinfo); // null-guarded below
+	SortingRendererClass::Flush();
+	TheDX8MeshRenderer.Clear_Pending_Delete_Lists(); // empty BGFX stub (Phase C)
+}
 void WW3D::Sync(bool) {}
 void WW3D::Update_Logic_Frame_Time(float ms) { LogicFrameTimeMs = ms; }
 WW3DErrorType WW3D::Set_Device_Resolution(int width, int height, int bits, int windowed, bool resize_window)
@@ -2260,7 +2372,24 @@ void WW3D::Set_MSAA_Mode(MultiSampleModeEnum) {}
 void WW3D::Set_Collision_Box_Display_Mask(int) {}
 void WW3D::Enable_Texturing(bool b) { IsTexturingEnabled = b; }
 void WW3D::Enable_Coloring(unsigned int c) { IsColoringEnabled = (c != 0); }
-void WW3D::Add_To_Static_Sort_List(RenderObjClass*, unsigned int) {}
-void WW3D::Render_And_Clear_Static_Sort_Lists(RenderInfoClass&) {}
+void WW3D::Add_To_Static_Sort_List(RenderObjClass* robj, unsigned int sort_level)
+{
+	// CurrentStaticSortLists is initialized only inside the DX8 gate
+	// (Reset_Current_Static_Sort_Lists_To_Default at :2124). Until BGFX
+	// provides its own static-sort init (Phase D), null-guard.
+	if (CurrentStaticSortLists) {
+		CurrentStaticSortLists->Add_To_List(robj, sort_level);
+	}
+}
+void WW3D::Render_And_Clear_Static_Sort_Lists(RenderInfoClass& rinfo)
+{
+	if (!CurrentStaticSortLists) {
+		return;
+	}
+	bool old_enable = AreStaticSortListsEnabled;
+	AreStaticSortListsEnabled = false;
+	CurrentStaticSortLists->Render_And_Clear(rinfo);
+	AreStaticSortListsEnabled = old_enable;
+}
 void WW3D::Toggle_Movie_Capture(const char*, float) {}
 #endif // !RTS_RENDERER_DX8

@@ -761,6 +761,7 @@ set(GAMEENGINE_SRC
     Source/GameClient/GUI/GUICallbacks/Menus/ReplayMenu.cpp
     Source/GameClient/GUI/GUICallbacks/Menus/ScoreScreen.cpp
     Source/GameClient/GUI/GUICallbacks/Menus/SinglePlayerMenu.cpp
+    Source/GameClient/GUI/GUICallbacks/Menus/AutoSkirmish.cpp
     Source/GameClient/GUI/GUICallbacks/Menus/SkirmishGameOptionsMenu.cpp
     Source/GameClient/GUI/GUICallbacks/Menus/SkirmishMapSelectMenu.cpp
     Source/GameClient/GUI/GUICallbacks/Menus/WOLBuddyOverlay.cpp

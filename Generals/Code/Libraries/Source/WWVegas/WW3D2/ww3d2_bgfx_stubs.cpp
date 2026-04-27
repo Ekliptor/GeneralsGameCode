@@ -33,24 +33,6 @@
 #include "WWLib/registry.h"
 #include "hashtemplate.h"
 #include "string_compat.h"
-// Phase D8 — un-stub the WW3DAssetManager loader pipeline so HLOD/Mesh
-// prototypes actually load on demand. Pulls in all the prototype-loader
-// globals defined across hlod.cpp / proto.cpp / boxrobj.cpp / etc.
-#include "boxrobj.h"
-#include "chunkio.h"
-#include "collect.h"
-#include "dazzle.h"
-#include "distlod.h"
-#include "ffactory.h"
-#include "nullrobj.h"
-#include "proto.h"
-#include "realcrc.h"
-#include "ringobj.h"
-#include "sphereobj.h"
-#include "wwdebug.h"
-#include "wwmemlog.h"
-#include "wwprofile.h"
-#include "assetstatus.h"
 #include <float.h>
 #include <cstring>
 
@@ -78,16 +60,7 @@ StubPersistFactoryClass _StubFactory;
 
 // ============================================================================
 // WW3DAssetManager
-// ----------------------------------------------------------------------------
-// Phase D8 — model loader pipeline un-stubbed. Mirrors the DX8 path in
-// assetmgr.cpp:210-245 / 625-836 / 1522-1694: register all the built-in
-// prototype loaders, then resolve `Create_Render_Obj` by walking the
-// prototype hash table and falling back to load-on-demand .w3d reads.
-// MetalMapManager / Font3D / HAnim / HTree are left stubbed below — they
-// aren't on the menu-shellmap path. The texture cache is already real.
 // ============================================================================
-
-namespace { NullPrototypeClass _NullPrototype; }
 
 WW3DAssetManager::WW3DAssetManager()
     : PrototypeLoaders(PROTOLOADERS_VECTOR_SIZE)
@@ -98,147 +71,21 @@ WW3DAssetManager::WW3DAssetManager()
     , MetalManager(nullptr)
 {
     TheInstance = this;
-
-    PrototypeLoaders.Set_Growth_Step(PROTOLOADERS_GROWTH_RATE);
-    Prototypes.Set_Growth_Step(PROTOTYPES_GROWTH_RATE);
-
-    Register_Prototype_Loader(&_MeshLoader);
-    Register_Prototype_Loader(&_HModelLoader);
-    Register_Prototype_Loader(&_CollectionLoader);
-    Register_Prototype_Loader(&_BoxLoader);
-    Register_Prototype_Loader(&_HLodLoader);
-    Register_Prototype_Loader(&_DistLODLoader);
-    Register_Prototype_Loader(&_AggregateLoader);
-    Register_Prototype_Loader(&_NullLoader);
-    Register_Prototype_Loader(&_DazzleLoader);
-    Register_Prototype_Loader(&_RingLoader);
-    Register_Prototype_Loader(&_SphereLoader);
-
-    PrototypeHashTable = W3DNEWARRAY PrototypeClass *[PROTOTYPE_HASH_TABLE_SIZE];
-    memset(PrototypeHashTable, 0, sizeof(PrototypeClass *) * PROTOTYPE_HASH_TABLE_SIZE);
 }
 
 WW3DAssetManager::~WW3DAssetManager()
 {
-    delete[] PrototypeHashTable;
-    PrototypeHashTable = nullptr;
     TheInstance = nullptr;
 }
 
-bool WW3DAssetManager::Load_3D_Assets(const char * filename)
-{
-    bool result = false;
-    FileClass * file = _TheFileFactory->Get_File(filename);
-    if (file) {
-        if (file->Is_Available()) {
-            result = WW3DAssetManager::Load_3D_Assets(*file);
-        } else {
-            WWDEBUG_SAY(("Missing asset '%s'.", filename));
-        }
-        _TheFileFactory->Return_File(file);
-    }
-    return result;
-}
-
-bool WW3DAssetManager::Load_3D_Assets(FileClass & w3dfile)
-{
-    WWPROFILE("WW3DAssetManager::Load_3D_Assets");
-    if (!w3dfile.Open()) {
-        return false;
-    }
-    ChunkLoadClass cload(&w3dfile);
-    while (cload.Open_Chunk()) {
-        // BGFX scope: skip W3D_CHUNK_HIERARCHY / ANIMATION (HTree / HAnim
-        // managers aren't wired up — those are for skinned/animated meshes,
-        // out of scope for D8). Everything else routes through the chunk
-        // loader registry like the DX8 path.
-        Load_Prototype(cload);
-        cload.Close_Chunk();
-    }
-    w3dfile.Close();
-    return true;
-}
-
-bool WW3DAssetManager::Load_Prototype(ChunkLoadClass & cload)
-{
-    WWPROFILE("WW3DAssetManager::Load_Prototype");
-    WWMEMLOG(MEM_GEOMETRY);
-    int chunk_id = cload.Cur_Chunk_ID();
-    PrototypeLoaderClass * loader = Find_Prototype_Loader(chunk_id);
-    PrototypeClass * newproto = nullptr;
-    if (loader != nullptr) {
-        newproto = loader->Load_W3D(cload);
-    } else {
-        WWDEBUG_SAY(("Unknown chunk type encountered!  Chunk Id = %d", chunk_id));
-        return false;
-    }
-    if (newproto != nullptr) {
-        if (!Render_Obj_Exists(newproto->Get_Name())) {
-            Add_Prototype(newproto);
-        } else {
-            WWDEBUG_SAY(("Render Object Name Collision: %s", newproto->Get_Name()));
-            newproto->DeleteSelf();
-            return false;
-        }
-    } else {
-        WWDEBUG_SAY(("Could not generate prototype!  Chunk = %d", chunk_id));
-        return false;
-    }
-    return true;
-}
-
+bool WW3DAssetManager::Load_3D_Assets(const char * /*filename*/) { return false; }
+bool WW3DAssetManager::Load_3D_Assets(FileClass & /*assetfile*/) { return false; }
 void WW3DAssetManager::Free_Assets() {}
 void WW3DAssetManager::Release_Unused_Assets() {}
 void WW3DAssetManager::Free_Assets_With_Exclusion_List(const DynamicVectorClass<StringClass> & /*list*/) {}
 void WW3DAssetManager::Create_Asset_List(DynamicVectorClass<StringClass> & /*list*/) {}
-
-RenderObjClass * WW3DAssetManager::Create_Render_Obj(const char * name)
-{
-    WWPROFILE("WW3DAssetManager::Create_Render_Obj");
-    WWMEMLOG(MEM_GEOMETRY);
-
-    PrototypeClass * proto = Find_Prototype(name);
-
-    if (WW3D_Load_On_Demand && proto == nullptr) {
-        AssetStatusClass::Peek_Instance()->Report_Load_On_Demand_RObj(name);
-        char filename[MAX_PATH];
-        const char * mesh_name = ::strchr(name, '.');
-        if (mesh_name != nullptr) {
-            // 64-bit safe pointer arithmetic — DX8 path's (int) casts truncate on macOS.
-            const size_t prefix_len = (size_t)((uintptr_t)mesh_name - (uintptr_t)name);
-            const size_t copy_len = prefix_len < (sizeof(filename) - 1) ? prefix_len : (sizeof(filename) - 1);
-            memcpy(filename, name, copy_len);
-            filename[copy_len] = '\0';
-            strncat(filename, ".w3d", sizeof(filename) - copy_len - 1);
-        } else {
-            snprintf(filename, ARRAY_SIZE(filename), "%s.w3d", name);
-        }
-        if (Load_3D_Assets(filename) == false) {
-            StringClass new_filename(StringClass("..\\"), true);
-            new_filename += filename;
-            Load_3D_Assets(new_filename);
-        }
-        proto = Find_Prototype(name);
-    }
-
-    if (proto == nullptr) {
-        static int warning_count = 0;
-        if (name[0] != '#') {
-            if (++warning_count <= 20) {
-                WWDEBUG_SAY(("WARNING: Failed to create Render Object: %s", name));
-            }
-            AssetStatusClass::Peek_Instance()->Report_Missing_RObj(name);
-        }
-        return nullptr;
-    }
-    return proto->Create();
-}
-
-bool WW3DAssetManager::Render_Obj_Exists(const char * name)
-{
-    return Find_Prototype(name) != nullptr;
-}
-
+RenderObjClass * WW3DAssetManager::Create_Render_Obj(const char * /*name*/) { return nullptr; }
+bool WW3DAssetManager::Render_Obj_Exists(const char * /*name*/) { return false; }
 RenderObjIterator * WW3DAssetManager::Create_Render_Obj_Iterator() { return nullptr; }
 void WW3DAssetManager::Release_Render_Obj_Iterator(RenderObjIterator * /*it*/) {}
 AssetIterator * WW3DAssetManager::Create_HAnim_Iterator() { return nullptr; }
@@ -357,49 +204,9 @@ FontCharsClass * WW3DAssetManager::Get_FontChars(const char * name, int point_si
 
 AssetIterator * WW3DAssetManager::Create_HTree_Iterator() { return nullptr; }
 HTreeClass * WW3DAssetManager::Get_HTree(const char * /*name*/) { return nullptr; }
-
-void WW3DAssetManager::Register_Prototype_Loader(PrototypeLoaderClass * loader)
-{
-    WWASSERT(loader != nullptr);
-    PrototypeLoaders.Add(loader);
-}
-
-PrototypeLoaderClass * WW3DAssetManager::Find_Prototype_Loader(int chunk_id)
-{
-    for (int i = 0; i < PrototypeLoaders.Count(); ++i) {
-        PrototypeLoaderClass * loader = PrototypeLoaders[i];
-        if (loader && loader->Chunk_Type() == chunk_id) {
-            return loader;
-        }
-    }
-    return nullptr;
-}
-
-void WW3DAssetManager::Add_Prototype(PrototypeClass * newproto)
-{
-    WWASSERT(newproto != nullptr);
-    int hash = CRC_Stringi(newproto->Get_Name()) & PROTOTYPE_HASH_MASK;
-    newproto->friend_setNextHash(PrototypeHashTable[hash]);
-    PrototypeHashTable[hash] = newproto;
-    Prototypes.Add(newproto);
-}
-
-PrototypeClass * WW3DAssetManager::Find_Prototype(const char * name)
-{
-    if (stricmp(name, "NULL") == 0) {
-        return &_NullPrototype;
-    }
-    int hash = CRC_Stringi(name) & PROTOTYPE_HASH_MASK;
-    PrototypeClass * test = PrototypeHashTable[hash];
-    while (test != nullptr) {
-        if (stricmp(test->Get_Name(), name) == 0) {
-            return test;
-        }
-        test = test->friend_getNextHash();
-    }
-    return nullptr;
-}
-
+void WW3DAssetManager::Register_Prototype_Loader(PrototypeLoaderClass * /*loader*/) {}
+void WW3DAssetManager::Add_Prototype(PrototypeClass * /*newproto*/) {}
+PrototypeClass * WW3DAssetManager::Find_Prototype(const char * /*name*/) { return nullptr; }
 AssetIterator * WW3DAssetManager::Create_Font3DData_Iterator() { return nullptr; }
 void WW3DAssetManager::Add_Font3DData(Font3DDataClass * /*font*/) {}
 void WW3DAssetManager::Remove_Font3DData(Font3DDataClass * /*font*/) {}
@@ -424,8 +231,7 @@ void WW3DAssetManager::Release_All_FontChars()
 
 MotionChannelClass::MotionChannelClass()
     : PivotIdx(0), Type(0), VectorLen(0)
-    , ValueOffset(0.0f), ValueScale(0.0f)
-    , CompressedData(nullptr), Data(nullptr)
+    , Data(nullptr)
     , FirstFrame(0), LastFrame(0)
 {}
 MotionChannelClass::~MotionChannelClass() {}

@@ -67,15 +67,28 @@ namespace
 			s_mouseScaleY = 1.0f;
 			return;
 		}
-		int winW = 0, winH = 0;
-		SDL_GetWindowSize(SDLDevice::TheSDLWindow, &winW, &winH);
-		if (winW <= 0 || winH <= 0) {
+		// SDL3 with SDL_WINDOW_HIGH_PIXEL_DENSITY reports mouse events in
+		// the window's logical-point coordinate system (per SDL3 migration
+		// docs), so the right scale is DEFAULT_DISPLAY_WIDTH / windowPoints.
+		// We can't trust SDL_GetWindowSize directly — on macOS fullscreen
+		// it has been observed returning the creation request (800×600)
+		// instead of the post-fullscreen point size. Derive points from
+		// SDL_GetWindowSizeInPixels (the real drawable, which BgfxBackend
+		// also uses) divided by SDL_GetWindowPixelDensity.
+		int pixW = 0, pixH = 0;
+		SDL_GetWindowSizeInPixels(SDLDevice::TheSDLWindow, &pixW, &pixH);
+		float density = SDL_GetWindowPixelDensity(SDLDevice::TheSDLWindow);
+		if (pixW <= 0 || pixH <= 0 || density <= 0.0f) {
 			s_mouseScaleX = 1.0f;
 			s_mouseScaleY = 1.0f;
 			return;
 		}
-		s_mouseScaleX = static_cast<float>(DEFAULT_DISPLAY_WIDTH)  / static_cast<float>(winW);
-		s_mouseScaleY = static_cast<float>(DEFAULT_DISPLAY_HEIGHT) / static_cast<float>(winH);
+		const float pointW = static_cast<float>(pixW) / density;
+		const float pointH = static_cast<float>(pixH) / density;
+		s_mouseScaleX = static_cast<float>(DEFAULT_DISPLAY_WIDTH)  / pointW;
+		s_mouseScaleY = static_cast<float>(DEFAULT_DISPLAY_HEIGHT) / pointH;
+		DEBUG_LOG(("SDL mouse scale: pixels=%dx%d density=%.3f points=%.1fx%.1f scale=%.5fx%.5f",
+			pixW, pixH, density, pointW, pointH, s_mouseScaleX, s_mouseScaleY));
 	}
 
 	inline Sint32 scaleX(float x)

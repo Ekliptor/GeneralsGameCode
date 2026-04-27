@@ -79,11 +79,11 @@ Round-7 fixes #8 (`Render2DClass` stage-1 unbind) and #9 (`Apply_Null` propagati
 
 ### Conclusion after round 8
 
-The 2D quad pipeline is functional on vanilla. Remaining gaps are shared with ZH and tracked under `ZH-MainMenu-Bugs.md`:
-- Button labels missing — font rasterizer stubbed (§3.3). **Update (ZH-MainMenu-Bugs §5.1, 2026-04-24): FIXED.** New `Core/Libraries/Source/WWVegas/WW3D2/render2dsentence_bgfx.cpp` rasterizes glyphs with `stb_truetype` into an A8R8G8B8 atlas and submits quads through the same `Render2DClass` pipeline the round-8 fix unblocked. Vanilla + ZH main-menu buttons both show their labels end-to-end.
-- 3D shell-map scene black — separate from 2D quad path (§3.2).
-- Background music silent — `OpenALAudioManager` gaps (§3.4).
-- Intro video still renders black — confirmed not a 2D-quad issue (audio plays, frames upload). Likely the same upstream submission gap that one diagnostic at this round did NOT pursue (only 1 dynamic draw/frame fires at the steady menu state on both targets — most UI elements may bypass `Draw_Triangles_Dynamic` entirely; needs a separate investigation pass).
+The 2D quad pipeline is functional on vanilla. Remaining gaps are shared with ZH and tracked under `ZH-MainMenu-Bugs.md`. Status as of 2026-04-26:
+- Button labels — **FIXED** (ZH-MainMenu-Bugs §5.1, 2026-04-24). New `Core/Libraries/Source/WWVegas/WW3D2/render2dsentence_bgfx.cpp` rasterizes glyphs with `stb_truetype` into an A8R8G8B8 atlas and submits quads through the same `Render2DClass` pipeline the round-8 fix unblocked. Vanilla + ZH main-menu buttons both show their labels end-to-end. HiDPI readability + combo-box title clipping passes (`docs/HiDPI-Font-Readability.md`) sit on top of that font path.
+- 3D shell-map scene — **partially fixed; visible area still dark** (ZH-MainMenu-Bugs §"Shell-map scene-population — round 2 update", 2026-04-26). The `#ifndef RTS_RENDERER_DX8` gate in `GameLOD.cpp` that force-disabled `m_shellMapOn` was removed in both targets; `ShellMapMD.map` now loads, `Add_Render_Object` fires, `Customized_Render` reaches `UpdateList=5 RenderList=2` (terrain + water). Particle queue is gated under `#ifdef RTS_RENDERER_DX8` as Phase D to avoid the `PointGroupClass::Update_Arrays` crash. Outstanding: terrain/water `Render` is invoked but the 3D area renders dark — next candidates are view-matrix repopulation after Render2D, empty BGFX lighting environment, or a `HeightMapRenderObjClass::Render` early-out.
+- Background music silent — **OPEN** (§3.4). `OpenALAudioManager` opens the ALC device and handles the FFmpeg intro audio stream, but the playback-facing overrides (`addAudioEvent`, `stopAudio`, `nextMusicTrack`, `isMusicPlaying`, `notifyOfAudioCompletion`, …) are empty `{}`. The Miles-style event queue → OpenAL source/buffer pipeline hasn't been ported.
+- Intro video still renders black — **OPEN**. Confirmed not a 2D-quad issue (audio plays, frames upload). Likely the same upstream submission gap not yet pursued (most UI elements may bypass `Draw_Triangles_Dynamic` entirely); needs a separate investigation pass.
 
 ### Round 8 follow-up (2026-04-24): proactive `sizeof(DWORD|LONG|WORD)` audit — clean
 

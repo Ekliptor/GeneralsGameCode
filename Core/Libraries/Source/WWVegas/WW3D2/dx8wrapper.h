@@ -1235,6 +1235,11 @@ WWINLINE void DX8Wrapper::Set_Projection_Transform_With_Z_Bias(const Matrix4x4& 
 	ZFar=zfar;
 	ZNear=znear;
 	ProjectionMatrix=To_D3DMATRIX(matrix);
+	// Capture for bgfx Apply_Render_State_Changes — DX8CALL below is a no-op
+	// in bgfx mode, so without this the camera's projection never reaches the
+	// backend and 3D submits draw with an identity projection.
+	render_state.projection = matrix;
+	render_state_changed |= (unsigned)PROJECTION_CHANGED;
 
 	if (!Get_Current_Caps()->Support_ZBias() && ZNear!=ZFar) {
 		D3DMATRIX tmp=ProjectionMatrix;

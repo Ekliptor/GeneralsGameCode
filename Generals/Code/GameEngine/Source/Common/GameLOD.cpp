@@ -622,18 +622,10 @@ void GameLODManager::applyStaticLODLevel(StaticGameLODLevel level)
 			TheWritableGlobalData->m_shellMapOn = false;
 		}
 
-#ifndef RTS_RENDERER_DX8
-		// The W3D scene → bgfx render path (SceneClass::Render +
-		// RenderObjClass mesh submission) is not yet ported. With
-		// m_shellMapOn=true the menu queues the 3D shellmap and the
-		// backbuffer renders black. Force-disable on non-DX8 builds so
-		// Shell::showShellMap takes the BlankWindow.wnd fallback path,
-		// which renders the static MainMenuBackdropUserInterface.tga
-		// via the existing W3DDisplay::drawImage UV-zero substitution
-		// (see W3DDisplay.cpp:2640-2646). Tracked under
-		// docs/ZH-MainMenu-Bugs.md §3.2.
-		TheWritableGlobalData->m_shellMapOn = false;
-#endif
+		// Phases 0/A/B/C un-stubbed the W3D→bgfx scene path
+		// (RenderObjClass, WW3D::Render, shader-manager pass count, mesh
+		// PolygonRendererList guards). The shellmap can now flow through
+		// the bgfx pipeline; previous force-disable lifted 2026-04-26.
 	}
 
 	if (TheTerrainVisual)

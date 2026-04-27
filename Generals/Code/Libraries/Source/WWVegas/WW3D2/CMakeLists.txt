@@ -242,6 +242,9 @@ if(RTS_RENDERER_LOWER STREQUAL "bgfx")
         # stb_truetype-backed FontCharsClass / Render2DSentenceClass impl.
         # Lives in Core/ so both vanilla and ZH builds compile the same file.
         ${CMAKE_SOURCE_DIR}/Core/Libraries/Source/WWVegas/WW3D2/render2dsentence_bgfx.cpp
+        # Phase D7 — direct-submit BGFX path for rigid HLOD/Mesh draws
+        # (replaces the stubbed DX8 polygon-renderer batching system).
+        ${CMAKE_SOURCE_DIR}/Core/Libraries/Source/WWVegas/WW3D2/MeshDirectRender.cpp
     )
     target_include_directories(g_ww3d2 PRIVATE
         ${CMAKE_SOURCE_DIR}/Core/Libraries/Source/WWVegas/WWAudio
