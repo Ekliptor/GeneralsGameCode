@@ -47,6 +47,8 @@
 //-----------------------------------------------------------------------------
 #include "W3DDevice/GameClient/HeightMap.h"
 
+#include <cstdio>
+
 #ifndef USE_FLAT_HEIGHT_MAP // Flat height map uses flattened textures. jba. [3/20/2003]
 
 #include <stdlib.h>
@@ -85,6 +87,10 @@
 #include "WW3D2/dx8wrapper.h"
 #include "WW3D2/light.h"
 #include "WW3D2/scene.h"
+#ifndef RTS_RENDERER_DX8
+#include "WW3D2/IRenderBackend.h"
+#include "WW3D2/RenderBackendRuntime.h"
+#endif
 #include "W3DDevice/GameClient/W3DPoly.h"
 #include "W3DDevice/GameClient/W3DCustomScene.h"
 
@@ -1990,6 +1996,61 @@ void HeightMapRenderObjClass::Render(RenderInfoClass & rinfo)
  		W3DShaderManager::setTexture(1,m_stageZeroTexture);
  		W3DShaderManager::setTexture(2,m_stageTwoTexture);	//cloud
  		W3DShaderManager::setTexture(3,m_stageThreeTexture);//noise
+
+#ifndef RTS_RENDERER_DX8
+		{
+			static bool s_phaseD13bWarned = false;
+			if (!s_phaseD13bWarned) {
+				s_phaseD13bWarned = true;
+				const char* tex0 = m_stageZeroTexture
+					? static_cast<const char*>(m_stageZeroTexture->Get_Texture_Name()) : "<null>";
+				const char* tex2 = m_stageTwoTexture
+					? static_cast<const char*>(m_stageTwoTexture->Get_Texture_Name()) : "<null>";
+				const char* tex3 = m_stageThreeTexture
+					? static_cast<const char*>(m_stageThreeTexture->Get_Texture_Name()) : "<null>";
+				std::fprintf(stderr,
+					"[PhaseD13b:texstate] stage0=%s stage2=%s stage3=%s shader=%d passes=%d\n",
+					tex0, tex2, tex3, static_cast<int>(st), devicePasses);
+
+				if (m_vertexBufferBackup != nullptr) {
+					for (Int tj = 0; tj < m_numVBTilesY; ++tj) {
+						for (Int ti = 0; ti < m_numVBTilesX; ++ti) {
+							VERTEX_FORMAT* vb = getVertexBufferBackup(ti, tj);
+							if (vb == nullptr) continue;
+							int hist[5] = {0,0,0,0,0};
+							int firstHighAlpha = -1;
+							for (int v = 0; v < HEIGHTMAP_VERTEX_NUM; ++v) {
+								unsigned a = (vb[v].diffuse >> 24) & 0xff;
+								if (a < 51)        hist[0]++;
+								else if (a < 102)  hist[1]++;
+								else if (a < 154)  hist[2]++;
+								else if (a < 205)  hist[3]++;
+								else {
+									hist[4]++;
+									if (firstHighAlpha < 0) firstHighAlpha = v;
+								}
+							}
+							const VERTEX_FORMAT& v0 = vb[0];
+							std::fprintf(stderr,
+								"[PhaseD13b:tile] (j,i)=(%d,%d) v0=(%.1f,%.1f,%.1f) diffuse=0x%08x uv0=(%.3f,%.3f) uv1=(%.3f,%.3f) alphaHist[<51,<102,<154,<205,>=205]=[%d,%d,%d,%d,%d]\n",
+								tj, ti, v0.x, v0.y, v0.z, v0.diffuse,
+								v0.u1, v0.v1, v0.u2, v0.v2,
+								hist[0], hist[1], hist[2], hist[3], hist[4]);
+							if (firstHighAlpha >= 0) {
+								const VERTEX_FORMAT& vh = vb[firstHighAlpha];
+								std::fprintf(stderr,
+									"[PhaseD13b:edge] (j,i)=(%d,%d) idx=%d pos=(%.1f,%.1f,%.1f) diffuse=0x%08x uv0=(%.3f,%.3f) uv1=(%.3f,%.3f)\n",
+									tj, ti, firstHighAlpha, vh.x, vh.y, vh.z, vh.diffuse,
+									vh.u1, vh.v1, vh.u2, vh.v2);
+							}
+						}
+					}
+				} else {
+					std::fprintf(stderr, "[PhaseD13b:tile] m_vertexBufferBackup==nullptr — vertex inspection skipped\n");
+				}
+			}
+		}
+#endif
 		//Disable writes to destination alpha channel (if there is one)
 		if (DX8Wrapper::getBackBufferFormat() == WW3D_FORMAT_A8R8G8B8)
 			DX8Wrapper::Set_DX8_Render_State(D3DRS_COLORWRITEENABLE,D3DCOLORWRITEENABLE_BLUE|D3DCOLORWRITEENABLE_GREEN|D3DCOLORWRITEENABLE_RED);
@@ -2031,6 +2092,20 @@ void HeightMapRenderObjClass::Render(RenderInfoClass & rinfo)
 				}
 #endif
 				if (Is_Hidden() == 0) {
+#ifndef RTS_RENDERER_DX8
+					{
+						static bool s_phaseD13aTerrainWarned = false;
+						if (!s_phaseD13aTerrainWarned) {
+							s_phaseD13aTerrainWarned = true;
+							std::fprintf(stderr,
+								"[PhaseD13a:terrain] firstFire pass=%d numVBTiles=%dx%d polysPerTile=%d vertsPerTile=%d\n",
+								pass, m_numVBTilesX, m_numVBTilesY,
+								HEIGHTMAP_POLYGON_NUM, HEIGHTMAP_VERTEX_NUM);
+						}
+					}
+					if (IRenderBackend* b = RenderBackendRuntime::Get_Active())
+						b->Set_Source_Tag(IRenderBackend::kSrcTerrain);
+#endif
 					DX8Wrapper::Draw_Triangles(0, HEIGHTMAP_POLYGON_NUM, 0, HEIGHTMAP_VERTEX_NUM);
 				}
 
@@ -2161,6 +2236,10 @@ void HeightMapRenderObjClass::renderTerrainPass(CameraClass *pCamera)
 			}
 #endif
 			if (Is_Hidden() == 0) {
+#ifndef RTS_RENDERER_DX8
+				if (IRenderBackend* b = RenderBackendRuntime::Get_Active())
+					b->Set_Source_Tag(IRenderBackend::kSrcTerrain);
+#endif
 				DX8Wrapper::Draw_Triangles(0, HEIGHTMAP_POLYGON_NUM, 0, HEIGHTMAP_VERTEX_NUM);
 			}
 		}
@@ -2183,6 +2262,18 @@ void HeightMapRenderObjClass::renderExtraBlendTiles()
 
 	if (!m_numExtraBlendTiles)
 		return;	//nothing to draw
+#ifndef RTS_RENDERER_DX8
+	{
+		static bool s_phaseD13bExtraBlendWarned = false;
+		if (!s_phaseD13bExtraBlendWarned) {
+			s_phaseD13bExtraBlendWarned = true;
+			std::fprintf(stderr,
+				"[PhaseD13b:extrablend] firstFire numExtraBlendTiles=%d use3Way=%d\n",
+				m_numExtraBlendTiles,
+				TheGlobalData ? (int)TheGlobalData->m_use3WayTerrainBlends : -1);
+		}
+	}
+#endif
 
 	if (maxBlendTiles > 10000)	//we can only fit about 10000 tiles into a single VB.
 		maxBlendTiles = 10000;
@@ -2335,6 +2426,10 @@ void HeightMapRenderObjClass::renderExtraBlendTiles()
 			DX8Wrapper::Set_Shader(shader);
 			DX8Wrapper::Set_Texture(0,nullptr);	//debug mode which draws terrain tiles in white.
 			if (Is_Hidden() == 0) {
+#ifndef RTS_RENDERER_DX8
+				if (IRenderBackend* b = RenderBackendRuntime::Get_Active())
+					b->Set_Source_Tag(IRenderBackend::kSrcExtraBlend);
+#endif
 				DX8Wrapper::Draw_Triangles(	0,indexCount/3, 0,	vertexCount);	//draw a quad, 2 triangles, 4 verts
 				m_numVisibleExtraBlendTiles += indexCount/6;
 			}
@@ -2368,6 +2463,10 @@ void HeightMapRenderObjClass::renderExtraBlendTiles()
 			{
 				W3DShaderManager::setShader(st, pass);
 				if (Is_Hidden() == 0) {
+#ifndef RTS_RENDERER_DX8
+					if (IRenderBackend* b = RenderBackendRuntime::Get_Active())
+						b->Set_Source_Tag(IRenderBackend::kSrcExtraBlend);
+#endif
 					DX8Wrapper::Draw_Triangles(	0,indexCount/3, 0,	vertexCount);	//draw a quad, 2 triangles, 4 verts
 					m_numVisibleExtraBlendTiles += indexCount/6;
 				}

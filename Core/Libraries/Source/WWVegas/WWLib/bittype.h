@@ -39,16 +39,19 @@
 
 typedef unsigned char	uint8;
 typedef unsigned short	uint16;
-// Phase D8 — was `unsigned long`, which is 8 bytes on 64-bit macOS/Linux and
-// silently corrupts every binary file format that lays out u32 fields
-// (ChunkHeader, W3D struct headers, etc.). Use the fixed-width type so the
-// file layout matches the on-disk one across platforms.
-typedef unsigned int	uint32;
+// NOTE — `uint32` / `sint32` are the original Westwood typedefs and are
+// `unsigned long` / `signed long`. On 64-bit macOS/Linux (LP64) those are
+// **8 bytes**, not 4. Any struct read from / written to disk MUST therefore
+// declare its 32-bit fields as fixed-width `uint32_t` / `int32_t` (see
+// w3d_file.h, w3d_obsolete.h, chunkio.h). Using `uint32` for an on-disk
+// member silently doubles `sizeof(struct)` and misaligns every following
+// read in the chunk.
+typedef unsigned long	uint32;
 typedef unsigned int    uint;
 
 typedef signed char		sint8;
 typedef signed short		sint16;
-typedef signed int		sint32;
+typedef signed long		sint32;
 typedef signed int      sint;
 
 typedef float				float32;

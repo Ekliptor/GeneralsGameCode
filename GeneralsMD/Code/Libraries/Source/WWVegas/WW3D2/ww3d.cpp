@@ -2153,6 +2153,7 @@ void WW3D::Set_Gamma(float gamma,float bright,float contrast,bool calibrate)
 #include "wwmemlog.h"
 #include "wwdebug.h"
 #include "shdlib.h"
+#include "MeshDirectRender.h"   // Phase D11: g_PhaseD11_StaticSortDeferCount
 
 // Note: some WW3D statics already live above the DX8 gate (SyncTime,
 // PreviousSyncTime, IsInitted, IsRendering, FrameCount, ThumbnailEnabled).
@@ -2384,6 +2385,18 @@ void WW3D::Add_To_Static_Sort_List(RenderObjClass* robj, unsigned int sort_level
 void WW3D::Render_And_Clear_Static_Sort_Lists(RenderInfoClass& rinfo)
 {
 	if (!CurrentStaticSortLists) {
+		// Phase D11 diagnostic: report magnitude of the BGFX null-guard
+		// drop. Tally is incremented from MeshClass::Render's static-sort
+		// defer branch. One-shot per session.
+		static bool s_warnedNull = false;
+		if (!s_warnedNull) {
+			s_warnedNull = true;
+			fprintf(stderr,
+				"[PhaseD11:staticsort-null] CurrentStaticSortLists==nullptr"
+				" — %d unique meshes were deferred and will never render"
+				" until D13 wires up a BGFX-side flush.\n",
+				g_PhaseD11_StaticSortDeferCount);
+		}
 		return;
 	}
 	bool old_enable = AreStaticSortListsEnabled;

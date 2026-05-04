@@ -83,7 +83,7 @@ struct W3dMaterialStruct
 	char		  	MaterialName[W3D_NAME_LEN];	// name of the material (null-terminated)
 	char	 		PrimaryName[W3D_NAME_LEN];		// primary texture name (null-terminated)
 	char	 		SecondaryName[W3D_NAME_LEN];	// secondary texture name (null-terminated)
-	uint32		RenderFlags;						// Rendering flags
+	uint32_t		RenderFlags;						// Rendering flags
 	uint8	 		Red;									// Rgb colors
 	uint8	 		Green;
 	uint8	 		Blue;
@@ -97,7 +97,7 @@ struct W3dMaterial2Struct
 	char		  	MaterialName[W3D_NAME_LEN];	// name of the material (null-terminated)
 	char	 		PrimaryName[W3D_NAME_LEN];		// primary texture name (null-terminated)
 	char	 		SecondaryName[W3D_NAME_LEN];	// secondary texture name (null-terminated)
-	uint32		RenderFlags;						// Rendering flags
+	uint32_t		RenderFlags;						// Rendering flags
 	uint8	 		Red;									// Rgb colors
 	uint8	 		Green;
 	uint8	 		Blue;
@@ -165,7 +165,7 @@ struct W3dMaterial2Struct
 /////////////////////////////////////////////////////////////////////////////////////////////
 struct W3dMaterial3Struct
 {
-	uint32					Attributes;					// flags,hints,etc.
+	uint32_t					Attributes;					// flags,hints,etc.
 
 	W3dRGBStruct			DiffuseColor;				// diffuse color
 	W3dRGBStruct			SpecularColor;				// specular color
@@ -198,11 +198,11 @@ struct W3dMap3Struct
 /////////////////////////////////////////////////////////////////////////////////////////////
 struct W3dSurrenderTriStruct
 {
-	uint32					Vindex[3];			// vertex, vert normal, and texture coord indexes (all use same index)
+	uint32_t					Vindex[3];			// vertex, vert normal, and texture coord indexes (all use same index)
 	W3dTexCoordStruct		TexCoord[3];		// texture coordinates	(OBSOLETE!!!)
-	uint32					MaterialIdx; 		// material index
+	uint32_t					MaterialIdx; 		// material index
 	W3dVectorStruct		Normal;		 		// Face normal
-	uint32					Attributes;			// collision flags, sort method, etc
+	uint32_t					Attributes;			// collision flags, sort method, etc
 	W3dRGBStruct			Gouraud[3];			// Pre-set shading values (OBSOLETE!!!)
 };
 
@@ -211,31 +211,31 @@ struct W3dSurrenderTriStruct
 /////////////////////////////////////////////////////////////////////////////////////////////
 struct W3dMeshHeaderStruct
 {
-	uint32					Version;							// Currently version 0x100
+	uint32_t					Version;							// Currently version 0x100
 	char						MeshName[W3D_NAME_LEN];		// name of the mesh (Null terminated)
-	uint32					Attributes;
+	uint32_t					Attributes;
 
 	//
 	// Counts, these can be regarded as an inventory of what is to come in the file.
 	//
-	uint32					NumTris;				// number of triangles (OBSOLETE!)
-	uint32					NumQuads;			// number of quads; (OBSOLETE!)
-	uint32					NumSrTris;			// number of triangles
+	uint32_t					NumTris;				// number of triangles (OBSOLETE!)
+	uint32_t					NumQuads;			// number of quads; (OBSOLETE!)
+	uint32_t					NumSrTris;			// number of triangles
 
-	uint32					NumPovTris;			// (NOT USED)
-	uint32					NumPovQuads;		// (NOT USED)
+	uint32_t					NumPovTris;			// (NOT USED)
+	uint32_t					NumPovQuads;		// (NOT USED)
 
-	uint32					NumVertices;		// number of unique vertices
-	uint32					NumNormals;			// number of unique normals (OBSOLETE!)
-	uint32					NumSrNormals;		// number of surrender normals (MUST EQUAL NumVertices or 0)
+	uint32_t					NumVertices;		// number of unique vertices
+	uint32_t					NumNormals;			// number of unique normals (OBSOLETE!)
+	uint32_t					NumSrNormals;		// number of surrender normals (MUST EQUAL NumVertices or 0)
 
-	uint32					NumTexCoords;		// number of unique texture coords (MUST EQUAL NumVertices or 0)
-	uint32					NumMaterials;		// number of unique materials needed
+	uint32_t					NumTexCoords;		// number of unique texture coords (MUST EQUAL NumVertices or 0)
+	uint32_t					NumMaterials;		// number of unique materials needed
 
-	uint32					NumVertColors;		// number of vertex colors (MUST EQUAL NumVertices or 0)
-	uint32					NumVertInfluences;// vertex influences(MUST EQUAL NumVertices or 0)
-	uint32					NumDamageStages;	// number of damage offset chunks
-	uint32					FutureCounts[5];	// reserve space for future counts (set to zero).
+	uint32_t					NumVertColors;		// number of vertex colors (MUST EQUAL NumVertices or 0)
+	uint32_t					NumVertInfluences;// vertex influences(MUST EQUAL NumVertices or 0)
+	uint32_t					NumDamageStages;	// number of damage offset chunks
+	uint32_t					FutureCounts[5];	// reserve space for future counts (set to zero).
 
 	//
 	// LOD controls
@@ -269,7 +269,7 @@ struct W3dMeshHeaderStruct
 	//
 	char						HierarchyTreeName[W3D_NAME_LEN];
 	char						HierarchyModelName[W3D_NAME_LEN];
-	uint32					FutureUse[24];		// Reserved for future use
+	uint32_t					FutureUse[24];		// Reserved for future use
 };
 
 
@@ -280,22 +280,22 @@ struct W3dMeshHeaderStruct
 //
 struct W3dMeshDamageStruct
 {
-	uint32					NumDamageMaterials;	// number of materials to replace
-	uint32					NumDamageVerts;		// number of vertices to replace
-	uint32					NumDamageColors;		// number of vertex colors to replace
-	uint32					DamageIndex;			// what index is this damage chunk assigned to
-	uint32					FutureUse[4];
+	uint32_t					NumDamageMaterials;	// number of materials to replace
+	uint32_t					NumDamageVerts;		// number of vertices to replace
+	uint32_t					NumDamageColors;		// number of vertex colors to replace
+	uint32_t					DamageIndex;			// what index is this damage chunk assigned to
+	uint32_t					FutureUse[4];
 };
 
 struct W3dMeshDamageVertexStruct
 {
-	uint32				VertexIndex;
+	uint32_t				VertexIndex;
 	W3dVectorStruct	NewVertex;
 };
 
 struct W3dMeshDamageColorStruct
 {
-	uint32				VertexIndex;
+	uint32_t				VertexIndex;
 	W3dRGBStruct		NewColor;
 };
 
@@ -309,15 +309,15 @@ struct W3dMeshDamageColorStruct
 //
 struct W3dHModelAuxDataStruct
 {
-	uint32					Attributes;
-	uint32					MeshCount;
-	uint32					CollisionCount;
-	uint32					SkinCount;
-	uint32					ShadowCount;
-	uint32					NullCount;
-	uint32					FutureCounts[6];
+	uint32_t					Attributes;
+	uint32_t					MeshCount;
+	uint32_t					CollisionCount;
+	uint32_t					SkinCount;
+	uint32_t					ShadowCount;
+	uint32_t					NullCount;
+	uint32_t					FutureCounts[6];
 
 	float32					LODMin;
 	float32					LODMax;
-	uint32					FutureUse[32];
+	uint32_t					FutureUse[32];
 };

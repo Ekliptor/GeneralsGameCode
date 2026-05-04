@@ -50,6 +50,11 @@
 #include <wwprofile.h>
 #include <algorithm>
 
+#ifndef RTS_RENDERER_DX8
+#include "IRenderBackend.h"
+#include "RenderBackendRuntime.h"
+#endif
+
 
 // Phase 5b: local D3DLIGHT8 conversion for Apply_Render_State.
 static D3DLIGHT8 To_D3DLIGHT8(const RenderLight& rl)
@@ -246,6 +251,10 @@ public:
 	unsigned short polygon_count;			// Polygon count to process (3 indices = one polygon)
 	unsigned short min_vertex_index;		// First index used in the vb
 	unsigned short vertex_count;			// Number of vertices used in vb
+	// Phase D17c — backend source tag captured at insert time. Re-asserted at
+	// flush time so deferred draws (notably particles) route to the correct
+	// per-source view/counter binning. Defaults to kSrcUnknown.
+	unsigned source_tag = 0;
 };
 
 static DLListClass<SortingNodeStruct> sorted_list;
@@ -394,6 +403,14 @@ void SortingRendererClass::Insert_Triangles(
 	state->polygon_count=polygon_count;
 	state->min_vertex_index=min_vertex_index;
 	state->vertex_count=vertex_count;
+#ifndef RTS_RENDERER_DX8
+	// Phase D17c — capture the active backend source tag so the deferred
+	// draw at flush time can re-assert it (kSrcParticle for PointGroupClass
+	// translucent path, etc.).
+	state->source_tag = 0;
+	if (IRenderBackend* b = RenderBackendRuntime::Get_Active())
+		state->source_tag = b->Get_Source_Tag();
+#endif
 
 	SortingVertexBufferClass* vertex_buffer=static_cast<SortingVertexBufferClass*>(state->sorting_state.vertex_buffers[0]);
 	WWASSERT(vertex_buffer);
@@ -515,8 +532,17 @@ static void Apply_Render_State(RenderStateStruct& render_state)
 		DX8Wrapper::Set_Texture(i,render_state.Textures[i]);
 	}
 
-	DX8Wrapper::_Set_DX8_Transform(D3DTS_WORLD,To_D3DMATRIX(render_state.world));
-	DX8Wrapper::_Set_DX8_Transform(D3DTS_VIEW,To_D3DMATRIX(render_state.view));
+	// Phase D17c — use DX8Wrapper::Set_Transform (sets dirty bits + caches into
+	// render_state) instead of _Set_DX8_Transform (DX8CALL-only, no-op on
+	// BGFX). Without this, the per-node world/view captured at insert time
+	// never reaches the BGFX backend and sort-flushed draws use whatever
+	// transforms were latched. Particles need IDENTITY view because their
+	// vertices are CPU pre-transformed to view space; non-particle sort items
+	// need their captured camera transforms. Apply_Render_State_Changes runs
+	// from inside DX8Wrapper::Draw_Triangles immediately below, draining the
+	// dirty bits to the backend.
+	DX8Wrapper::Set_Transform(D3DTS_WORLD, render_state.world);
+	DX8Wrapper::Set_Transform(D3DTS_VIEW, render_state.view);
 
 
 	if (!render_state.material->Get_Lighting())
@@ -666,6 +692,9 @@ void SortingRendererClass::Flush_Sorting_Pool()
 
 	DX8Wrapper::Apply_Render_State_Changes();
 
+#ifndef RTS_RENDERER_DX8
+	IRenderBackend* backend = RenderBackendRuntime::Get_Active();
+#endif
 	unsigned count_to_render=1;
 	unsigned start_index=0;
 	unsigned node_id=tis[0].idx;
@@ -674,6 +703,13 @@ void SortingRendererClass::Flush_Sorting_Pool()
 			SortingNodeStruct* state=overlapping_nodes[node_id];
 			Apply_Render_State(state->sorting_state);
 
+#ifndef RTS_RENDERER_DX8
+			// Phase D17c — re-assert the source tag captured at insert time so
+			// the backend routes the deferred draw to the correct view
+			// (kView3DPart for particles) and bins the counter correctly.
+			if (backend)
+				backend->Set_Source_Tag(state->source_tag);
+#endif
 			DX8Wrapper::Draw_Triangles(
 				start_index*3,
 				count_to_render,
@@ -692,6 +728,10 @@ void SortingRendererClass::Flush_Sorting_Pool()
 		SortingNodeStruct* state=overlapping_nodes[node_id];
 		Apply_Render_State(state->sorting_state);
 
+#ifndef RTS_RENDERER_DX8
+		if (backend)
+			backend->Set_Source_Tag(state->source_tag);
+#endif
 		DX8Wrapper::Draw_Triangles(
 			start_index*3,
 			count_to_render,
@@ -723,6 +763,9 @@ void SortingRendererClass::Flush()
 	DX8Wrapper::Get_Transform(D3DTS_VIEW,old_view);
 	DX8Wrapper::Get_Transform(D3DTS_WORLD,old_world);
 
+#ifndef RTS_RENDERER_DX8
+	IRenderBackend* flushBackend = RenderBackendRuntime::Get_Active();
+#endif
 	while (SortingNodeStruct* state=sorted_list.Head()) {
 		state->Remove();
 
@@ -732,6 +775,11 @@ void SortingRendererClass::Flush()
 		}
 		else {
 			DX8Wrapper::Set_Render_State(state->sorting_state);
+#ifndef RTS_RENDERER_DX8
+			// Phase D17c — re-assert captured source tag for non-sorting-pool path.
+			if (flushBackend)
+				flushBackend->Set_Source_Tag(state->source_tag);
+#endif
 			DX8Wrapper::Draw_Triangles(state->start_index,state->polygon_count,state->min_vertex_index,state->vertex_count);
 			DX8Wrapper::Release_Render_State();
 			Release_Refs(state);
@@ -832,6 +880,12 @@ void SortingRendererClass::Insert_VolumeParticle(
 	state->min_vertex_index=min_vertex_index;
 	state->polygon_count=polygon_count * layerCount;//THIS IS VOLUME_PARTICLE SPECIFIC
 	state->vertex_count=vertex_count * layerCount;//THIS IS VOLUME_PARTICLE SPECIFIC
+#ifndef RTS_RENDERER_DX8
+	// Phase D17c — capture backend source tag for re-assertion at flush time.
+	state->source_tag = 0;
+	if (IRenderBackend* b = RenderBackendRuntime::Get_Active())
+		state->source_tag = b->Get_Source_Tag();
+#endif
 
 	SortingVertexBufferClass* vertex_buffer=static_cast<SortingVertexBufferClass*>(state->sorting_state.vertex_buffers[0]);
 	WWASSERT(vertex_buffer);

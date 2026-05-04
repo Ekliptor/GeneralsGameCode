@@ -4555,12 +4555,12 @@ void DX8Wrapper::Do_Onetime_Device_Dependent_Inits()
 {
 	// The DX8 branch runs a block of subsystem Init() calls here. Most of
 	// those (TheDX8MeshRenderer, SHD_INIT, BoxRenderObjClass,
-	// ShatterSystem, TextureLoader, PointGroupClass::_Init) poke DirectX
-	// state (VBs/IBs, shader constants, render targets) and are either
-	// stubbed out or would null-deref in bgfx mode. VertexMaterialClass::Init
-	// is the exception — pure data that populates Presets[] so that the
-	// first Get_Preset() call (e.g. W3DBridgeBuffer::allocateBridgeBuffers
-	// during terrain init) doesn't dereference a null Presets[type].
+	// ShatterSystem, TextureLoader) poke DirectX state (VBs/IBs, shader
+	// constants, render targets) and are either stubbed out or would
+	// null-deref in bgfx mode. VertexMaterialClass::Init is the exception
+	// — pure data that populates Presets[] so that the first Get_Preset()
+	// call (e.g. W3DBridgeBuffer::allocateBridgeBuffers during terrain
+	// init) doesn't dereference a null Presets[type].
 	VertexMaterialClass::Init();
 	// MissingTexture::_Init is a no-op when the bgfx backend isn't live yet
 	// (this runs during DX8Wrapper::Init, before Set_Render_Device brings up
@@ -4569,6 +4569,13 @@ void DX8Wrapper::Do_Onetime_Device_Dependent_Inits()
 	// is wired here so the hook is in place for a future re-call after the
 	// backend is up.
 	MissingTexture::_Init();
+	// Phase D17 — particle pipeline needs the orientation/UV tables and the
+	// shared Tris/Quads index buffers populated. _Init also fetches
+	// PRELIT_DIFFUSE off the just-initialised VertexMaterialClass. The IBs
+	// go through DX8IndexBufferClass which on the bgfx path writes into a
+	// CPU shadow that Draw_Triangles later uploads — no DX device required
+	// at construction time.
+	PointGroupClass::_Init();
 	// Prime a permissive DX8Caps so gameplay subsystems (W3DRadar, water,
 	// shadows) that ask "does the hardware support format X?" get a yes
 	// without hitting the D3D path. The bgfx stub ctor fills in sensible

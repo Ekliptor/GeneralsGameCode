@@ -216,8 +216,16 @@ private:
 	// bgfx::frame() applies to ALL submits to that view ID. Routing 3D to
 	// kView3D and 2D to kView2D keeps them independent so the 2D HUD's
 	// identity/ortho transform doesn't overwrite the 3D camera.
-	static constexpr uint16_t kView3D = 0;   // backbuffer 3D scene
-	static constexpr uint16_t kView2D = 1;   // backbuffer 2D HUD/menu overlay
+	//
+	// Phase D17 — kView3DPart added so PointGroupClass particle submits
+	// (which CPU-pretransform vertices to view space and then poke
+	// VIEW=identity into the pipeline) don't clobber kView3D's camera
+	// view at frame() time. Particle draws are routed here when
+	// `m_phaseD13cSourceTag == kSrcParticle`. Order: kView3D → kView3DPart
+	// → kView2D so particles draw above terrain/meshes but below HUD.
+	static constexpr uint16_t kView3D     = 0;   // backbuffer 3D scene
+	static constexpr uint16_t kView2D     = 1;   // backbuffer 2D HUD/menu overlay
+	static constexpr uint16_t kView3DPart = 2;   // backbuffer 3D particle overlay
 	float m_view3DMtx[16] = {
 		1.f,0.f,0.f,0.f, 0.f,1.f,0.f,0.f, 0.f,0.f,1.f,0.f, 0.f,0.f,0.f,1.f };
 	float m_proj3DMtx[16] = {
@@ -226,8 +234,13 @@ private:
 		1.f,0.f,0.f,0.f, 0.f,1.f,0.f,0.f, 0.f,0.f,1.f,0.f, 0.f,0.f,0.f,1.f };
 	float m_proj2DMtx[16] = {
 		1.f,0.f,0.f,0.f, 0.f,1.f,0.f,0.f, 0.f,0.f,1.f,0.f, 0.f,0.f,0.f,1.f };
-	bool m_view3DDirty = true;
-	bool m_view2DDirty = true;
+	float m_view3DPartMtx[16] = {
+		1.f,0.f,0.f,0.f, 0.f,1.f,0.f,0.f, 0.f,0.f,1.f,0.f, 0.f,0.f,0.f,1.f };
+	float m_proj3DPartMtx[16] = {
+		1.f,0.f,0.f,0.f, 0.f,1.f,0.f,0.f, 0.f,0.f,1.f,0.f, 0.f,0.f,0.f,1.f };
+	bool m_view3DDirty     = true;
+	bool m_view2DDirty     = true;
+	bool m_view3DPartDirty = true;
 	bool m_active2D    = false;        // latched by Set_Projection_Transform
 	uint16_t m_pendingSubmitView = 0;  // set by ApplyDrawState; read by submit sites
 
@@ -280,6 +293,22 @@ private:
 	// didn't actually carry a mip chain.
 	std::unordered_map<uintptr_t, uint8_t> m_textureMipCounts;
 
+	// [PhaseD13c] per-frame draw-call accounting. Reset in End_Scene.
+	unsigned m_phaseD13cFrameIndex     = 0;
+	unsigned m_phaseD13cFrameDrawCalls = 0;
+	unsigned m_phaseD13cFrameTris      = 0;
+
+public:
+	// [PhaseD13c] callers tag their draws via Set_Source_Tag(...) (declared
+	// on IRenderBackend so non-bgfx callers compile). Reset by End_Scene.
+	void Set_Source_Tag(unsigned tag) override { m_phaseD13cSourceTag = tag; }
+	unsigned Get_Source_Tag() const override { return m_phaseD13cSourceTag; }
+private:
+	static constexpr unsigned kPhaseD13cSrcCount = 8; // matches IRenderBackend::DrawSourceTag enum
+	unsigned m_phaseD13cSourceTag = 0; // kSrcUnknown
+	unsigned m_phaseD13cSourceTris[kPhaseD13cSrcCount]  = {0};
+	unsigned m_phaseD13cSourceCalls[kPhaseD13cSrcCount] = {0};
+
 	// Phase D6 — bumped 2 → 4 to hold cloud (stage 2) and lightmap (stage 3)
 	// alongside the existing base diffuse (stage 0) and alpha-edge (stage 1).
 	static constexpr unsigned kMaxTextureStages = 4;
@@ -311,7 +340,7 @@ private:
 	};
 	std::vector<BgfxRenderTarget*> m_renderTargets;
 	uint16_t m_currentView = 0;   // 0 == backbuffer-3D when no RT bound
-	uint16_t m_nextViewId  = 2;   // RTs allocate from 2 (kView2D=1 reserved)
+	uint16_t m_nextViewId  = 3;   // RTs allocate from 3 (kView2D=1, kView3DPart=2 reserved)
 
 	void UpdateViewOrder();
 };

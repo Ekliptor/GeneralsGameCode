@@ -48,6 +48,7 @@
 
 #include "W3DDevice/GameClient/W3DTerrainBackground.h"
 
+#include <cstdio>
 #include <assetmgr.h>
 #include <texture.h>
 #include "Common/GlobalData.h"
@@ -774,6 +775,24 @@ void W3DTerrainBackground::drawVisiblePolys(RenderInfoClass & rinfo, Bool disabl
 			DX8Wrapper::Set_Texture(1, m_terrainTexture);
 		}
 	}
+#ifndef RTS_RENDERER_DX8
+	{
+		static bool s_phaseD13aTerrainBgWarned = false;
+		if (!s_phaseD13aTerrainBgWarned) {
+			s_phaseD13aTerrainBgWarned = true;
+			TextureClass* boundTex = m_terrainTexture4X
+				? m_terrainTexture4X
+				: (m_terrainTexture2X ? m_terrainTexture2X : m_terrainTexture);
+			const char* texName = boundTex
+				? static_cast<const char*>(boundTex->Get_Texture_Name())
+				: "<null>";
+			std::fprintf(stderr,
+				"[PhaseD13a:terrainbg] firstFire verts=%d idx=%d disableTex=%d stage1Tex=%s stage0=unbound\n",
+				m_curNumTerrainVertices, m_curNumTerrainIndices,
+				disableTextures ? 1 : 0, texName);
+		}
+	}
+#endif
 	DX8Wrapper::Draw_Triangles(	0, m_curNumTerrainIndices/3, 0,	m_curNumTerrainVertices);
 #else
 	if (m_curNumTerrainIndices == 0) {

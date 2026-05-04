@@ -177,7 +177,7 @@ private:
 
 	void								Build_W3D_AABTree_Recursive(CullNodeStruct *	node,
 											W3dMeshAABTreeNode * w3dnodes,
-											uint32 * poly_indices,
+											uint32_t * poly_indices,
 											int & cur_node,
 											int &	cur_poly);
 	/*

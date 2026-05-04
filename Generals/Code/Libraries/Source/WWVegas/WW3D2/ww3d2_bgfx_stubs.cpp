@@ -24,6 +24,9 @@
 #include "surfaceclass.h"
 #include "dx8wrapper.h"
 #include "dx8renderer.h"
+#include "decalmsh.h"
+#include "mesh.h"
+#include "meshmdl.h"
 #include "agg_def.h"
 #include "part_ldr.h"
 #include "wwstring.h"
@@ -33,7 +36,27 @@
 #include "WWLib/registry.h"
 #include "hashtemplate.h"
 #include "string_compat.h"
+// Phase D8 / D14 — un-stub the WW3DAssetManager loader pipeline so HLOD,
+// mesh, and HTree prototypes load on demand. Pulls in all the prototype-
+// loader globals defined across hlod.cpp / proto.cpp / boxrobj.cpp / etc.
+#include "boxrobj.h"
+#include "chunkio.h"
+#include "collect.h"
+#include "dazzle.h"
+#include "distlod.h"
+#include "ffactory.h"
+#include "nullrobj.h"
+#include "proto.h"
+#include "realcrc.h"
+#include "ringobj.h"
+#include "sphereobj.h"
+#include "w3d_file.h"
+#include "wwdebug.h"
+#include "wwmemlog.h"
+#include "wwprofile.h"
+#include "assetstatus.h"
 #include <float.h>
+#include <cstdio>
 #include <cstring>
 
 // ============================================================================
@@ -60,7 +83,18 @@ StubPersistFactoryClass _StubFactory;
 
 // ============================================================================
 // WW3DAssetManager
+// ----------------------------------------------------------------------------
+// Phase D8 — model loader pipeline un-stubbed. Mirrors the DX8 path in
+// assetmgr.cpp:210-245 / 625-836 / 1522-1694: register all the built-in
+// prototype loaders, then resolve `Create_Render_Obj` by walking the
+// prototype hash table and falling back to load-on-demand .w3d reads.
+// Phase D14 — extended to dispatch W3D_CHUNK_HIERARCHY to HTreeManager
+// and W3D_CHUNK_ANIMATION* to HAnimManager so skinned units load real
+// skeletons instead of falling back to HTreeClass::Init_Default (1 pivot,
+// causes infantry to render as flat polygons — see D13c.2/.3 findings).
 // ============================================================================
+
+namespace { NullPrototypeClass _NullPrototype; }
 
 WW3DAssetManager::WW3DAssetManager()
     : PrototypeLoaders(PROTOLOADERS_VECTOR_SIZE)
@@ -71,25 +105,216 @@ WW3DAssetManager::WW3DAssetManager()
     , MetalManager(nullptr)
 {
     TheInstance = this;
+
+    PrototypeLoaders.Set_Growth_Step(PROTOLOADERS_GROWTH_RATE);
+    Prototypes.Set_Growth_Step(PROTOTYPES_GROWTH_RATE);
+
+    Register_Prototype_Loader(&_MeshLoader);
+    Register_Prototype_Loader(&_HModelLoader);
+    Register_Prototype_Loader(&_CollectionLoader);
+    Register_Prototype_Loader(&_BoxLoader);
+    Register_Prototype_Loader(&_HLodLoader);
+    Register_Prototype_Loader(&_DistLODLoader);
+    Register_Prototype_Loader(&_AggregateLoader);
+    Register_Prototype_Loader(&_NullLoader);
+    Register_Prototype_Loader(&_DazzleLoader);
+    Register_Prototype_Loader(&_RingLoader);
+    Register_Prototype_Loader(&_SphereLoader);
+
+    PrototypeHashTable = W3DNEWARRAY PrototypeClass *[PROTOTYPE_HASH_TABLE_SIZE];
+    memset(PrototypeHashTable, 0, sizeof(PrototypeClass *) * PROTOTYPE_HASH_TABLE_SIZE);
 }
 
 WW3DAssetManager::~WW3DAssetManager()
 {
+    Free_Assets();
+    delete[] PrototypeHashTable;
+    PrototypeHashTable = nullptr;
     TheInstance = nullptr;
 }
 
-bool WW3DAssetManager::Load_3D_Assets(const char * /*filename*/) { return false; }
-bool WW3DAssetManager::Load_3D_Assets(FileClass & /*assetfile*/) { return false; }
-void WW3DAssetManager::Free_Assets() {}
+bool WW3DAssetManager::Load_3D_Assets(const char * filename)
+{
+    bool result = false;
+    FileClass * file = _TheFileFactory->Get_File(filename);
+    if (file) {
+        if (file->Is_Available()) {
+            result = WW3DAssetManager::Load_3D_Assets(*file);
+        } else {
+            WWDEBUG_SAY(("Missing asset '%s'.", filename));
+        }
+        _TheFileFactory->Return_File(file);
+    }
+    return result;
+}
+
+bool WW3DAssetManager::Load_3D_Assets(FileClass & w3dfile)
+{
+    WWPROFILE("WW3DAssetManager::Load_3D_Assets");
+    if (!w3dfile.Open()) {
+        return false;
+    }
+    ChunkLoadClass cload(&w3dfile);
+    while (cload.Open_Chunk()) {
+        switch (cload.Cur_Chunk_ID()) {
+            case W3D_CHUNK_HIERARCHY:
+                HTreeManager.Load_Tree(cload);
+                break;
+
+            case W3D_CHUNK_ANIMATION:
+            case W3D_CHUNK_COMPRESSED_ANIMATION:
+            case W3D_CHUNK_MORPH_ANIMATION:
+                HAnimManager.Load_Anim(cload);
+                break;
+
+            default:
+                Load_Prototype(cload);
+                break;
+        }
+        cload.Close_Chunk();
+    }
+    w3dfile.Close();
+    return true;
+}
+
+bool WW3DAssetManager::Load_Prototype(ChunkLoadClass & cload)
+{
+    WWPROFILE("WW3DAssetManager::Load_Prototype");
+    WWMEMLOG(MEM_GEOMETRY);
+    int chunk_id = cload.Cur_Chunk_ID();
+    PrototypeLoaderClass * loader = Find_Prototype_Loader(chunk_id);
+    PrototypeClass * newproto = nullptr;
+    if (loader != nullptr) {
+        newproto = loader->Load_W3D(cload);
+    } else {
+        WWDEBUG_SAY(("Unknown chunk type encountered!  Chunk Id = %d", chunk_id));
+        return false;
+    }
+    if (newproto != nullptr) {
+        if (!Render_Obj_Exists(newproto->Get_Name())) {
+            Add_Prototype(newproto);
+        } else {
+            WWDEBUG_SAY(("Render Object Name Collision: %s", newproto->Get_Name()));
+            newproto->DeleteSelf();
+            return false;
+        }
+    } else {
+        WWDEBUG_SAY(("Could not generate prototype!  Chunk = %d", chunk_id));
+        return false;
+    }
+    return true;
+}
+
+void WW3DAssetManager::Free_Assets()
+{
+    WWPROFILE("WW3DAssetManager::Free_Assets");
+
+    int count = Prototypes.Count();
+    while (count-- > 0) {
+        PrototypeClass * proto = Prototypes[count];
+        Prototypes.Delete(count);
+        if (proto != nullptr) {
+            proto->DeleteSelf();
+        }
+    }
+    if (PrototypeHashTable) {
+        memset(PrototypeHashTable, 0, sizeof(PrototypeClass *) * PROTOTYPE_HASH_TABLE_SIZE);
+    }
+
+    HAnimManager.Free_All_Anims();
+    HTreeManager.Free_All_Trees();
+
+    Release_All_Textures();
+    Release_All_Font3DDatas();
+    Release_All_FontChars();
+}
 void WW3DAssetManager::Release_Unused_Assets() {}
 void WW3DAssetManager::Free_Assets_With_Exclusion_List(const DynamicVectorClass<StringClass> & /*list*/) {}
 void WW3DAssetManager::Create_Asset_List(DynamicVectorClass<StringClass> & /*list*/) {}
-RenderObjClass * WW3DAssetManager::Create_Render_Obj(const char * /*name*/) { return nullptr; }
-bool WW3DAssetManager::Render_Obj_Exists(const char * /*name*/) { return false; }
+
+RenderObjClass * WW3DAssetManager::Create_Render_Obj(const char * name)
+{
+    WWPROFILE("WW3DAssetManager::Create_Render_Obj");
+    WWMEMLOG(MEM_GEOMETRY);
+
+    PrototypeClass * proto = Find_Prototype(name);
+
+    if (WW3D_Load_On_Demand && proto == nullptr) {
+        AssetStatusClass::Peek_Instance()->Report_Load_On_Demand_RObj(name);
+        char filename[MAX_PATH];
+        const char * mesh_name = ::strchr(name, '.');
+        if (mesh_name != nullptr) {
+            // 64-bit safe pointer arithmetic — DX8 path's (int) casts truncate on macOS.
+            const size_t prefix_len = (size_t)((uintptr_t)mesh_name - (uintptr_t)name);
+            const size_t copy_len = prefix_len < (sizeof(filename) - 1) ? prefix_len : (sizeof(filename) - 1);
+            memcpy(filename, name, copy_len);
+            filename[copy_len] = '\0';
+            strncat(filename, ".w3d", sizeof(filename) - copy_len - 1);
+        } else {
+            snprintf(filename, ARRAY_SIZE(filename), "%s.w3d", name);
+        }
+        if (Load_3D_Assets(filename) == false) {
+            StringClass new_filename(StringClass("..\\"), true);
+            new_filename += filename;
+            Load_3D_Assets(new_filename);
+        }
+        proto = Find_Prototype(name);
+    }
+
+    if (proto == nullptr) {
+        static int warning_count = 0;
+        if (name[0] != '#') {
+            if (++warning_count <= 20) {
+                WWDEBUG_SAY(("WARNING: Failed to create Render Object: %s", name));
+            }
+            AssetStatusClass::Peek_Instance()->Report_Missing_RObj(name);
+        }
+        return nullptr;
+    }
+    return proto->Create();
+}
+
+bool WW3DAssetManager::Render_Obj_Exists(const char * name)
+{
+    return Find_Prototype(name) != nullptr;
+}
+
 RenderObjIterator * WW3DAssetManager::Create_Render_Obj_Iterator() { return nullptr; }
 void WW3DAssetManager::Release_Render_Obj_Iterator(RenderObjIterator * /*it*/) {}
 AssetIterator * WW3DAssetManager::Create_HAnim_Iterator() { return nullptr; }
-HAnimClass * WW3DAssetManager::Get_HAnim(const char * /*name*/) { return nullptr; }
+
+// Phase D14 — mirror assetmgr.cpp:965-1003. Resolve HAnims by name; fall
+// back to load-on-demand .w3d reads. The animation name format is
+// "<htree>.<anim>" — the .w3d filename is everything after the dot.
+HAnimClass * WW3DAssetManager::Get_HAnim(const char * name)
+{
+    WWPROFILE("WW3DAssetManager::Get_HAnim");
+    HAnimClass * anim = HAnimManager.Get_Anim(name);
+
+    if (WW3D_Load_On_Demand && anim == nullptr) {
+        if (!HAnimManager.Is_Missing(name)) {
+            AssetStatusClass::Peek_Instance()->Report_Load_On_Demand_HAnim(name);
+            char filename[MAX_PATH];
+            const char * animname = strchr(name, '.');
+            if (animname != nullptr) {
+                snprintf(filename, ARRAY_SIZE(filename), "%s.w3d", animname + 1);
+            } else {
+                WWDEBUG_SAY(("Animation %s has no . in the name", name));
+                return nullptr;
+            }
+            if (Load_3D_Assets(filename) == false) {
+                StringClass new_filename = StringClass("..\\") + filename;
+                Load_3D_Assets(new_filename);
+            }
+            anim = HAnimManager.Get_Anim(name);
+            if (anim == nullptr) {
+                HAnimManager.Register_Missing(name);
+                AssetStatusClass::Peek_Instance()->Report_Missing_HAnim(name);
+            }
+        }
+    }
+    return anim;
+}
 
 // ---------------------------------------------------------------------------
 // Texture hash-cache implementations mirror the real DX8 asset manager
@@ -203,10 +428,74 @@ FontCharsClass * WW3DAssetManager::Get_FontChars(const char * name, int point_si
 }
 
 AssetIterator * WW3DAssetManager::Create_HTree_Iterator() { return nullptr; }
-HTreeClass * WW3DAssetManager::Get_HTree(const char * /*name*/) { return nullptr; }
-void WW3DAssetManager::Register_Prototype_Loader(PrototypeLoaderClass * /*loader*/) {}
-void WW3DAssetManager::Add_Prototype(PrototypeClass * /*newproto*/) {}
-PrototypeClass * WW3DAssetManager::Find_Prototype(const char * /*name*/) { return nullptr; }
+
+// Phase D14 — mirror assetmgr.cpp:1019-1048. The previous nullptr stub
+// caused Animatable3DObjClass to fall back to HTreeClass::Init_Default
+// (NumPivots=1), which made every CPU-skinned mesh read OOB bone matrices
+// and collapse to garbage flat polygons (D13c.2 root cause).
+HTreeClass * WW3DAssetManager::Get_HTree(const char * name)
+{
+    WWPROFILE("WW3DAssetManager::Get_HTree");
+    HTreeClass * htree = HTreeManager.Get_Tree(name);
+
+    if (WW3D_Load_On_Demand && htree == nullptr) {
+        AssetStatusClass::Peek_Instance()->Report_Load_On_Demand_HTree(name);
+        char filename[MAX_PATH];
+        snprintf(filename, ARRAY_SIZE(filename), "%s.w3d", name);
+        if (Load_3D_Assets(filename) == false) {
+            StringClass new_filename("..\\", true);
+            new_filename += filename;
+            Load_3D_Assets(new_filename);
+        }
+        htree = HTreeManager.Get_Tree(name);
+        if (htree == nullptr) {
+            AssetStatusClass::Peek_Instance()->Report_Missing_HTree(name);
+        }
+    }
+    return htree;
+}
+
+void WW3DAssetManager::Register_Prototype_Loader(PrototypeLoaderClass * loader)
+{
+    WWASSERT(loader != nullptr);
+    PrototypeLoaders.Add(loader);
+}
+
+PrototypeLoaderClass * WW3DAssetManager::Find_Prototype_Loader(int chunk_id)
+{
+    for (int i = 0; i < PrototypeLoaders.Count(); ++i) {
+        PrototypeLoaderClass * loader = PrototypeLoaders[i];
+        if (loader && loader->Chunk_Type() == chunk_id) {
+            return loader;
+        }
+    }
+    return nullptr;
+}
+
+void WW3DAssetManager::Add_Prototype(PrototypeClass * newproto)
+{
+    WWASSERT(newproto != nullptr);
+    int hash = CRC_Stringi(newproto->Get_Name()) & PROTOTYPE_HASH_MASK;
+    newproto->friend_setNextHash(PrototypeHashTable[hash]);
+    PrototypeHashTable[hash] = newproto;
+    Prototypes.Add(newproto);
+}
+
+PrototypeClass * WW3DAssetManager::Find_Prototype(const char * name)
+{
+    if (stricmp(name, "NULL") == 0) {
+        return &_NullPrototype;
+    }
+    int hash = CRC_Stringi(name) & PROTOTYPE_HASH_MASK;
+    PrototypeClass * test = PrototypeHashTable[hash];
+    while (test != nullptr) {
+        if (stricmp(test->Get_Name(), name) == 0) {
+            return test;
+        }
+        test = test->friend_getNextHash();
+    }
+    return nullptr;
+}
 AssetIterator * WW3DAssetManager::Create_Font3DData_Iterator() { return nullptr; }
 void WW3DAssetManager::Add_Font3DData(Font3DDataClass * /*font*/) {}
 void WW3DAssetManager::Remove_Font3DData(Font3DDataClass * /*font*/) {}
@@ -226,83 +515,25 @@ void WW3DAssetManager::Release_All_FontChars()
 // ============================================================================
 
 // ============================================================================
-// Motion/Bit channel classes
+// Motion/Bit channel classes — Phase D15 un-stubbed.
+// The real implementations are in motchan.cpp (un-gated, fully BGFX-clean).
+// Previously the duplicate stubs here were winning the static-archive symbol
+// race and returning false from Load_W3D, which made HAnims load but stay
+// channel-less so units rendered in bind pose. Removing these stubs lets
+// the real chunk-walking loaders link in. Constructors come from motchan.cpp.
 // ============================================================================
 
-MotionChannelClass::MotionChannelClass()
-    : PivotIdx(0), Type(0), VectorLen(0)
-    , Data(nullptr)
-    , FirstFrame(0), LastFrame(0)
-{}
-MotionChannelClass::~MotionChannelClass() {}
-bool MotionChannelClass::Load_W3D(ChunkLoadClass & /*cload*/) { return false; }
-
-BitChannelClass::BitChannelClass()
-    : PivotIdx(0), Type(0), DefaultVal(0)
-    , FirstFrame(0), LastFrame(0), Bits(nullptr)
-{}
-BitChannelClass::~BitChannelClass() {}
-bool BitChannelClass::Load_W3D(ChunkLoadClass & /*cload*/) { return false; }
-
-TimeCodedMotionChannelClass::TimeCodedMotionChannelClass()
-    : PivotIdx(0), Type(0), VectorLen(0), PacketSize(0)
-    , NumTimeCodes(0), LastTimeCodeIdx(0), CachedIdx(0)
-    , Data(nullptr)
-{}
-TimeCodedMotionChannelClass::~TimeCodedMotionChannelClass() {}
-bool TimeCodedMotionChannelClass::Load_W3D(ChunkLoadClass & /*cload*/) { return false; }
-void TimeCodedMotionChannelClass::Get_Vector(float32 /*frame*/, float * setvec)
-{
-    if (setvec) {
-        for (int i = 0; i < VectorLen && i < 4; ++i) setvec[i] = 0.0f;
-    }
-}
-Quaternion TimeCodedMotionChannelClass::Get_QuatVector(float32 /*frame*/)
-{
-    return Quaternion(true); // identity
-}
-
-AdaptiveDeltaMotionChannelClass::AdaptiveDeltaMotionChannelClass()
-    : PivotIdx(0), Type(0), VectorLen(0)
-    , NumFrames(0), Scale(0.0f)
-    , Data(nullptr), CacheFrame(0), CacheData(nullptr)
-{}
-AdaptiveDeltaMotionChannelClass::~AdaptiveDeltaMotionChannelClass() {}
-bool AdaptiveDeltaMotionChannelClass::Load_W3D(ChunkLoadClass & /*cload*/) { return false; }
-void AdaptiveDeltaMotionChannelClass::Get_Vector(float32 /*frame*/, float * setvec)
-{
-    if (setvec) {
-        for (int i = 0; i < VectorLen && i < 4; ++i) setvec[i] = 0.0f;
-    }
-}
-Quaternion AdaptiveDeltaMotionChannelClass::Get_QuatVector(float32 /*frame*/)
-{
-    return Quaternion(true);
-}
-
-TimeCodedBitChannelClass::TimeCodedBitChannelClass()
-    : PivotIdx(0), Type(0), DefaultVal(0)
-    , NumTimeCodes(0), CachedIdx(0), Bits(nullptr)
-{}
-TimeCodedBitChannelClass::~TimeCodedBitChannelClass() {}
-bool TimeCodedBitChannelClass::Load_W3D(ChunkLoadClass & /*cload*/) { return false; }
-int TimeCodedBitChannelClass::Get_Bit(int /*frame*/) { return DefaultVal; }
-
 // ============================================================================
-// ParticleEmitterClass::Reset
+// Phase D16 — particle emitter loader / instance bodies live in
+// part_ldr.cpp + part_emt.cpp now (gates lifted on the MD side, vanilla
+// Generals was already ungated). The duplicate stubs here were returning
+// nullptr from Load_W3D so .w3d-defined particle emitters never loaded.
 // ============================================================================
 
-void ParticleEmitterClass::Reset() {}
-
-// ============================================================================
-// AggregateLoader / ParticleEmitterLoader globals
-// ============================================================================
-
+// AggregateLoader still stubbed — it composes multiple render objects
+// per .w3d (used for landmark / multi-mesh assets); not on the menu path.
 AggregateLoaderClass _AggregateLoader;
 PrototypeClass * AggregateLoaderClass::Load_W3D(ChunkLoadClass & /*chunk_load*/) { return nullptr; }
-
-ParticleEmitterLoaderClass _ParticleEmitterLoader;
-PrototypeClass * ParticleEmitterLoaderClass::Load_W3D(ChunkLoadClass & /*chunk_load*/) { return nullptr; }
 
 // FontCharsClass + Render2DSentenceClass implementations live in
 // render2dsentence_bgfx.cpp (stb_truetype glyph rasterizer + atlas).
@@ -337,7 +568,71 @@ void TextureClass::Get_Level_Description(SurfaceClass::SurfaceDescription & desc
 
 void TextureLoader::Validate_Texture_Size(unsigned & /*width*/, unsigned & /*height*/, unsigned & /*depth*/) {}
 
-TextureClass * Load_Texture(ChunkLoadClass & /*cload*/) { return nullptr; }
+// Load_Texture: BGFX implementation. Core/.../texture.cpp's Load_Texture
+// is gated to RTS_RENDERER_DX8, and the prior stub returned nullptr,
+// which left every mesh's Textures vector empty → crash inside
+// Peek_Texture during read_texture_ids. Reads the W3D_CHUNK_TEXTURE
+// sub-chunks (name + optional texinfo) and routes the name through
+// WW3DAssetManager::Get_Texture (the same path terrain textures use).
+TextureClass * Load_Texture(ChunkLoadClass & cload)
+{
+    if (!cload.Open_Chunk() || cload.Cur_Chunk_ID() != W3D_CHUNK_TEXTURE) {
+        return nullptr;
+    }
+
+    char name[256] = {0};
+    W3dTextureInfoStruct texinfo;
+    bool hastexinfo = false;
+
+    while (cload.Open_Chunk()) {
+        switch (cload.Cur_Chunk_ID()) {
+            case W3D_CHUNK_TEXTURE_NAME:
+                cload.Read(name, cload.Cur_Chunk_Length());
+                break;
+            case W3D_CHUNK_TEXTURE_INFO:
+                cload.Read(&texinfo, sizeof(W3dTextureInfoStruct));
+                hastexinfo = true;
+                break;
+        }
+        cload.Close_Chunk();
+    }
+    cload.Close_Chunk();
+
+    TextureClass * newtex = nullptr;
+    if (hastexinfo) {
+        MipCountType mipcount = MIP_LEVELS_ALL;
+        bool no_lod = ((texinfo.Attributes & W3DTEXTURE_NO_LOD) == W3DTEXTURE_NO_LOD);
+        if (no_lod) {
+            mipcount = MIP_LEVELS_1;
+        } else {
+            switch (texinfo.Attributes & W3DTEXTURE_MIP_LEVELS_MASK) {
+                case W3DTEXTURE_MIP_LEVELS_ALL: mipcount = MIP_LEVELS_ALL; break;
+                case W3DTEXTURE_MIP_LEVELS_2:   mipcount = MIP_LEVELS_2;   break;
+                case W3DTEXTURE_MIP_LEVELS_3:   mipcount = MIP_LEVELS_3;   break;
+                case W3DTEXTURE_MIP_LEVELS_4:   mipcount = MIP_LEVELS_4;   break;
+                default:                        mipcount = MIP_LEVELS_ALL; break;
+            }
+        }
+        newtex = WW3DAssetManager::Get_Instance()->Get_Texture(name, mipcount);
+        if (newtex) {
+            if (no_lod) {
+                newtex->Get_Filter().Set_Mip_Mapping(TextureFilterClass::FILTER_TYPE_NONE);
+            }
+            const bool u_clamp = ((texinfo.Attributes & W3DTEXTURE_CLAMP_U) != 0);
+            newtex->Get_Filter().Set_U_Addr_Mode(
+                u_clamp ? TextureFilterClass::TEXTURE_ADDRESS_CLAMP
+                        : TextureFilterClass::TEXTURE_ADDRESS_REPEAT);
+            const bool v_clamp = ((texinfo.Attributes & W3DTEXTURE_CLAMP_V) != 0);
+            newtex->Get_Filter().Set_V_Addr_Mode(
+                v_clamp ? TextureFilterClass::TEXTURE_ADDRESS_CLAMP
+                        : TextureFilterClass::TEXTURE_ADDRESS_REPEAT);
+        }
+    } else {
+        newtex = WW3DAssetManager::Get_Instance()->Get_Texture(name);
+    }
+
+    return newtex;
+}
 
 void Convert_Pixel(unsigned char * /*pixel*/, const SurfaceClass::SurfaceDescription & /*sd*/, const Vector3 & /*rgb*/) {}
 
@@ -364,11 +659,33 @@ void DX8MeshRendererClass::Clear_Pending_Delete_Lists() {}
 void DX8MeshRendererClass::Invalidate(bool /*shutdown*/) {}
 void DX8MeshRendererClass::Register_Mesh_Type(MeshModelClass * /*mmc*/) {}
 void DX8MeshRendererClass::Unregister_Mesh_Type(MeshModelClass * /*mmc*/) {}
-void DX8MeshRendererClass::Add_To_Render_List(DecalMeshClass * /*decalmesh*/) {}
+void DX8MeshRendererClass::Add_To_Render_List(DecalMeshClass * decalmesh)
+{
+	if (decalmesh == nullptr) return;
+	static const DecalMeshClass* seen[64] = {};
+	static int seenCount = 0;
+	for (int i = 0; i < seenCount; ++i) {
+		if (seen[i] == decalmesh) return;
+	}
+	if (seenCount >= 64) return;
+	seen[seenCount++] = decalmesh;
+	MeshClass* parent = decalmesh->Peek_Parent();
+	const char* parentName = (parent && parent->Peek_Model()) ? parent->Peek_Model()->Get_Name() : "<noparent>";
+	std::fprintf(stderr,
+		"[PhaseD13a:stub-decal] unique=%d ptr=%p parent=%s\n",
+		seenCount, (void*)decalmesh, parentName);
+}
 
 DX8MeshRendererClass TheDX8MeshRenderer;
 
-void DX8FVFCategoryContainer::Add_Visible_Material_Pass(MaterialPassClass * /*pass*/, MeshClass * /*mesh*/) {}
+void DX8FVFCategoryContainer::Add_Visible_Material_Pass(MaterialPassClass * /*pass*/, MeshClass * mesh)
+{
+	static bool s_warned = false;
+	if (s_warned) return;
+	s_warned = true;
+	const char* name = (mesh && mesh->Peek_Model()) ? mesh->Peek_Model()->Get_Name() : "<unknown>";
+	std::fprintf(stderr, "[PhaseD13a:stub-matpass] firstFire mesh=%s\n", name);
+}
 void DX8FVFCategoryContainer::Change_Polygon_Renderer_Texture(
     MultiListClass<DX8PolygonRendererClass> & /*list*/,
     TextureClass * /*texture*/, TextureClass * /*new_texture*/,
@@ -378,9 +695,23 @@ void DX8FVFCategoryContainer::Change_Polygon_Renderer_Material(
     VertexMaterialClass * /*vmat*/, VertexMaterialClass * /*new_vmat*/,
     unsigned /*pass*/) {}
 
-void DX8SkinFVFCategoryContainer::Add_Visible_Skin(MeshClass * /*mesh*/) {}
+void DX8SkinFVFCategoryContainer::Add_Visible_Skin(MeshClass * mesh)
+{
+	static bool s_warned = false;
+	if (s_warned) return;
+	s_warned = true;
+	const char* name = (mesh && mesh->Peek_Model()) ? mesh->Peek_Model()->Get_Name() : "<unknown>";
+	std::fprintf(stderr, "[PhaseD13a:stub-skin] firstFire mesh=%s\n", name);
+}
 
-void DX8TextureCategoryClass::Add_Render_Task(DX8PolygonRendererClass * /*p_renderer*/, MeshClass * /*p_mesh*/) {}
+void DX8TextureCategoryClass::Add_Render_Task(DX8PolygonRendererClass * /*p_renderer*/, MeshClass * p_mesh)
+{
+	static bool s_warned = false;
+	if (s_warned) return;
+	s_warned = true;
+	const char* name = (p_mesh && p_mesh->Peek_Model()) ? p_mesh->Peek_Model()->Get_Name() : "<unknown>";
+	std::fprintf(stderr, "[PhaseD13a:stub-rendertask] firstFire mesh=%s\n", name);
+}
 void DX8TextureCategoryClass::Remove_Polygon_Renderer(DX8PolygonRendererClass * /*p_renderer*/) {}
 
 // ============================================================================

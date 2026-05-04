@@ -817,7 +817,7 @@ void AABTreeBuilderClass::Export(ChunkSaveClass & csave)
 	** Pack the tree into an array of W3dMeshAABTreeNode's and polygon indices
 	*/
 	W3dMeshAABTreeNode * nodes = W3DNEWARRAY W3dMeshAABTreeNode[Node_Count()];
-	uint32 * poly_indices = W3DNEWARRAY uint32[Poly_Count()];
+	uint32_t * poly_indices = W3DNEWARRAY uint32_t[Poly_Count()];
 
 	int cur_node = 0;
 	int cur_poly = 0;
@@ -838,7 +838,7 @@ void AABTreeBuilderClass::Export(ChunkSaveClass & csave)
 	** Write out the array of polygon indices
 	*/
 	csave.Begin_Chunk(W3D_CHUNK_AABTREE_POLYINDICES);
-	csave.Write(poly_indices,Poly_Count() * sizeof(uint32));
+	csave.Write(poly_indices,Poly_Count() * sizeof(uint32_t));
 	csave.End_Chunk();
 
 	/*
@@ -870,7 +870,7 @@ void AABTreeBuilderClass::Build_W3D_AABTree_Recursive
 (
 	AABTreeBuilderClass::CullNodeStruct *	node,
 	W3dMeshAABTreeNode *							w3d_nodes,
-	uint32 *											poly_indices,
+	uint32_t *										poly_indices,
 	int &												cur_node,
 	int &												cur_poly
 )

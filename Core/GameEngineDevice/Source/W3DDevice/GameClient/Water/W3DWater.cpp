@@ -33,6 +33,8 @@
 // INCLUDES ///////////////////////////////////////////////////////////////////////////////////////
 
 #include "W3DDevice/GameClient/W3DWater.h"
+
+#include <cstdio>
 #include "W3DDevice/GameClient/HeightMap.h"
 #include "W3DDevice/GameClient/W3DShroud.h"
 #include "W3DDevice/GameClient/W3DWaterTracks.h"
@@ -1510,6 +1512,18 @@ void WaterRenderObjClass::renderMirror(CameraClass *cam)
 //DECLARE_PERF_TIMER(Water)
 void WaterRenderObjClass::Render(RenderInfoClass & rinfo)
 {
+#ifndef RTS_RENDERER_DX8
+	{
+		static bool s_phaseD13aWaterWarned = false;
+		if (!s_phaseD13aWaterWarned) {
+			s_phaseD13aWaterWarned = true;
+			std::fprintf(stderr,
+				"[PhaseD13a:water] firstFire mapLoaded=%d\n",
+				(TheTerrainRenderObject && TheTerrainRenderObject->getMap()) ? 1 : 0);
+		}
+	}
+#endif
+
 	//USE_PERF_TIMER(Water)
 	if (TheTerrainRenderObject && !TheTerrainRenderObject->getMap())
 		return;	//no map has been loaded yet.

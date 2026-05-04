@@ -85,6 +85,10 @@
 #include "dx8indexbuffer.h"
 #include "rinfo.h"
 #include "camera.h"
+#ifndef RTS_RENDERER_DX8
+#include "IRenderBackend.h"
+#include "RenderBackendRuntime.h"
+#endif
 #include "dx8fvf.h"
 #include "sortingrenderer.h"
 
@@ -977,6 +981,15 @@ void PointGroupClass::Render(RenderInfoClass &rinfo)
 		DX8Wrapper::Set_Index_Buffer (indexbuffer, 0);
 		DX8Wrapper::Set_Vertex_Buffer (PointVerts);
 
+#ifndef RTS_RENDERER_DX8
+		// Phase D17c — tag particle draws unconditionally. The sort branch
+		// captures the tag inside SortingRendererClass::Insert_Triangles for
+		// re-assertion at flush time; the immediate branch consumes it before
+		// Draw_Triangles. Both routes funnel through kView3DPart in the
+		// bgfx backend so the camera matrix on kView3D isn't clobbered.
+		if (IRenderBackend* b = RenderBackendRuntime::Get_Active())
+			b->Set_Source_Tag(IRenderBackend::kSrcParticle);
+#endif
 		if ( sort )
 		{
 				SortingRendererClass::Insert_Triangles (0, delta / verticesperprimitive, 0, delta);
@@ -1899,11 +1912,18 @@ void PointGroupClass::RenderVolumeParticle(RenderInfoClass &rinfo, unsigned int 
 
 			/// @todo lorenzen sez: precompute these params, above
 
-
+#ifndef RTS_RENDERER_DX8
+			// Phase D17c — see comment on the QUADS path above. Both sort and
+			// immediate routes get the kSrcParticle tag.
+			if (IRenderBackend* b = RenderBackendRuntime::Get_Active())
+				b->Set_Source_Tag(IRenderBackend::kSrcParticle);
+#endif
 			if ( sort )
 					SortingRendererClass::Insert_Triangles (0, delta / verticesperprimitive, 0, delta);
 			else
+			{
 				DX8Wrapper::Draw_Triangles (0, delta / verticesperprimitive, 0, delta);
+			}
 
 
 			current+=delta;

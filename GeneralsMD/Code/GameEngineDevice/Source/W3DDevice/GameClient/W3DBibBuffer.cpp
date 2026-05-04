@@ -48,6 +48,7 @@
 
 #include "W3DDevice/GameClient/W3DBibBuffer.h"
 
+#include <cstdio>
 #include <assetmgr.h>
 #include <texture.h>
 #include "Common/GlobalData.h"
@@ -60,6 +61,10 @@
 #include "WW3D2/dx8renderer.h"
 #include "WW3D2/mesh.h"
 #include "WW3D2/meshmdl.h"
+#ifndef RTS_RENDERER_DX8
+#include "WW3D2/IRenderBackend.h"
+#include "WW3D2/RenderBackendRuntime.h"
+#endif
 
 //-----------------------------------------------------------------------------
 //         Private Data
@@ -423,16 +428,43 @@ void W3DBibBuffer::renderBibs()
 	if (m_curNumBibIndices == 0) {
 		return;
 	}
+#ifndef RTS_RENDERER_DX8
+	{
+		static bool s_phaseD13aBibsWarned = false;
+		if (!s_phaseD13aBibsWarned) {
+			s_phaseD13aBibsWarned = true;
+			const char* texNormal = m_bibTexture
+				? static_cast<const char*>(m_bibTexture->Get_Texture_Name())
+				: "<null>";
+			const char* texHighlight = m_highlightBibTexture
+				? static_cast<const char*>(m_highlightBibTexture->Get_Texture_Name())
+				: "<null>";
+			std::fprintf(stderr,
+				"[PhaseD13a:bibs] firstFire idx=%d normalIdx=%d verts=%d normalVerts=%d texN=%s texH=%s\n",
+				m_curNumBibIndices, m_curNumNormalBibIndices,
+				m_curNumBibVertices, m_curNumNormalBibVertex,
+				texNormal, texHighlight);
+		}
+	}
+#endif
 	// Setup the vertex buffer, shader & texture.
 	DX8Wrapper::Set_Index_Buffer(m_indexBib,0);
 	DX8Wrapper::Set_Vertex_Buffer(m_vertexBib);
 	DX8Wrapper::Set_Shader(detailAlphaShader);
 	if (m_curNumNormalBibIndices) {
 		DX8Wrapper::Set_Texture(0,m_bibTexture);
+#ifndef RTS_RENDERER_DX8
+		if (IRenderBackend* b = RenderBackendRuntime::Get_Active())
+			b->Set_Source_Tag(IRenderBackend::kSrcBibs);
+#endif
 		DX8Wrapper::Draw_Triangles(	0, m_curNumNormalBibIndices/3, 0,	m_curNumNormalBibVertex);
 	}
 	if (m_curNumBibIndices>m_curNumNormalBibIndices) {
 		DX8Wrapper::Set_Texture(0,m_highlightBibTexture);
+#ifndef RTS_RENDERER_DX8
+		if (IRenderBackend* b = RenderBackendRuntime::Get_Active())
+			b->Set_Source_Tag(IRenderBackend::kSrcBibs);
+#endif
 		DX8Wrapper::Draw_Triangles(	m_curNumNormalBibIndices, (m_curNumBibIndices-m_curNumNormalBibIndices)/3,
 						m_curNumNormalBibVertex,	m_curNumBibVertices-m_curNumNormalBibVertex);
 	}

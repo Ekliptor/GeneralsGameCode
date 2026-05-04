@@ -33,10 +33,12 @@
  * - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
 
+// Phase D16 — gate lifted: part_ldr.cpp is renderer-independent (chunk-walk
+// + setter calls on emitter-definition objects), no DX8 calls. Particle
+// rendering uses pointgr.cpp's BGFX path. Lifting the gate lets the BGFX
+// build actually load particle prototypes from .w3d archives.
+
 #include "part_ldr.h"
-
-#ifdef RTS_RENDERER_DX8
-
 #include "part_emt.h"
 #include "w3derr.h"
 #include "chunkio.h"
@@ -1878,4 +1880,3 @@ ParticleEmitterLoaderClass::Load_W3D (ChunkLoadClass &chunk_load)
 	 return pprototype;
 }
 
-#endif // RTS_RENDERER_DX8

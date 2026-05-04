@@ -27,6 +27,7 @@
 void* s_cached_nwh = nullptr;
 #endif
 #include "WW3D2/RenderBackendRuntime.h"
+#include "WW3D2/MeshDirectRender.h"
 #include "vector4.h"
 
 #include <bgfx/bgfx.h>
@@ -44,6 +45,7 @@ void* s_cached_nwh = nullptr;
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <vector>
 
 // Phase 5e — embedded shader bytes produced at build time by shaderc via the
 // bgfx_compile_shaders(AS_HEADERS) helper. One header per (shader, profile)
@@ -196,12 +198,25 @@ bool BgfxBackend::Init(void* windowHandle, int width, int height, bool windowed)
 		// Phase D part 4 — configure both backbuffer views. kView3D owns
 		// the 3D scene + clear; kView2D is the HUD/menu overlay (sequential
 		// submission order for layered alpha overdraw, no clear).
+		// Phase D17 — kView3DPart is the particle overlay between them;
+		// inherits the 3D viewport but uses its own (identity) view transform
+		// so PointGroupClass::Render's CPU-pretransformed verts don't poke
+		// kView3D's matrix and zero-out the camera retroactively.
 		const uint16_t w16 = static_cast<uint16_t>(width);
 		const uint16_t h16 = static_cast<uint16_t>(height);
-		bgfx::setViewRect(kView3D, 0, 0, w16, h16);
-		bgfx::setViewRect(kView2D, 0, 0, w16, h16);
+		bgfx::setViewRect(kView3D,     0, 0, w16, h16);
+		bgfx::setViewRect(kView3DPart, 0, 0, w16, h16);
+		bgfx::setViewRect(kView2D,     0, 0, w16, h16);
+		bgfx::setViewClear(kView3DPart, BGFX_CLEAR_NONE);
+		bgfx::setViewMode(kView3DPart, bgfx::ViewMode::Sequential);
 		bgfx::setViewMode(kView2D, bgfx::ViewMode::Sequential);
 		bgfx::setViewClear(kView2D, BGFX_CLEAR_NONE);
+		// Phase D17 — explicit view order: kView3D → kView3DPart → kView2D.
+		// Default bgfx order is ascending view ID (0,1,2) which would
+		// submit kView2D=1 before kView3DPart=2, putting particles on top
+		// of the HUD. UpdateViewOrder reasserts this when RTs are added.
+		const bgfx::ViewId kBackbufferOrder[3] = { kView3D, kView3DPart, kView2D };
+		bgfx::setViewOrder(0, 3, kBackbufferOrder);
 	}
 
 	const bgfx::RendererType::Enum rendererType = bgfx::getRendererType();
@@ -291,8 +306,9 @@ bool BgfxBackend::Reset(int width, int height, bool windowed)
 		// ViewMode and ClearMask survive bgfx::reset, so only re-issue rects.
 		const uint16_t w16 = static_cast<uint16_t>(width);
 		const uint16_t h16 = static_cast<uint16_t>(height);
-		bgfx::setViewRect(kView3D, 0, 0, w16, h16);
-		bgfx::setViewRect(kView2D, 0, 0, w16, h16);
+		bgfx::setViewRect(kView3D,     0, 0, w16, h16);
+		bgfx::setViewRect(kView3DPart, 0, 0, w16, h16);
+		bgfx::setViewRect(kView2D,     0, 0, w16, h16);
 	}
 	return true;
 }
@@ -306,6 +322,7 @@ void BgfxBackend::Begin_Scene()
 	if (m_currentView == 0)
 	{
 		bgfx::touch(kView3D);
+		bgfx::touch(kView3DPart);
 		bgfx::touch(kView2D);
 	}
 	else
@@ -324,6 +341,38 @@ void BgfxBackend::End_Scene(bool flip)
 	if (s_cached_nwh)
 		BgfxMacOSLayer::Fit_Layer_To_View(s_cached_nwh);
 #endif
+
+	// [PhaseD13c] log per-frame draw-call + triangle counts at logarithmic
+	// frame indices so we can see whether either grows over time.
+	{
+		++m_phaseD13cFrameIndex;
+		const unsigned f = m_phaseD13cFrameIndex;
+		if (f == 1 || f == 30 || f == 60 || f == 120 || f == 300 ||
+		    f == 600 || f == 1200 || f == 1800 || f == 2400 || f == 3000) {
+			std::fprintf(stderr,
+				"[PhaseD13c:framedraw] frame=%u drawCalls=%u tris=%u "
+				"|mesh=%u/%u terrain=%u/%u particle=%u/%u tracks=%u/%u "
+				"roads=%u/%u bibs=%u/%u extraBlend=%u/%u unknown=%u/%u "
+				"(calls/tris)\n",
+				f, m_phaseD13cFrameDrawCalls, m_phaseD13cFrameTris,
+				m_phaseD13cSourceCalls[kSrcMeshDirect], m_phaseD13cSourceTris[kSrcMeshDirect],
+				m_phaseD13cSourceCalls[kSrcTerrain],    m_phaseD13cSourceTris[kSrcTerrain],
+				m_phaseD13cSourceCalls[kSrcParticle],   m_phaseD13cSourceTris[kSrcParticle],
+				m_phaseD13cSourceCalls[kSrcTracks],     m_phaseD13cSourceTris[kSrcTracks],
+				m_phaseD13cSourceCalls[kSrcRoads],      m_phaseD13cSourceTris[kSrcRoads],
+				m_phaseD13cSourceCalls[kSrcBibs],       m_phaseD13cSourceTris[kSrcBibs],
+				m_phaseD13cSourceCalls[kSrcExtraBlend], m_phaseD13cSourceTris[kSrcExtraBlend],
+				m_phaseD13cSourceCalls[kSrcUnknown],    m_phaseD13cSourceTris[kSrcUnknown]);
+		}
+		WW3D2::Phase_D13c_Mesh_Frame_End(f);
+		m_phaseD13cFrameDrawCalls = 0;
+		m_phaseD13cFrameTris      = 0;
+		for (unsigned i = 0; i < kPhaseD13cSrcCount; ++i) {
+			m_phaseD13cSourceCalls[i] = 0;
+			m_phaseD13cSourceTris[i]  = 0;
+		}
+	}
+
 	bgfx::frame(flip);
 }
 
@@ -607,6 +656,15 @@ void BgfxBackend::Set_World_Transform(const float m[16])
 
 void BgfxBackend::Set_View_Transform(const float m[16])
 {
+	// Phase D17 — route particle draws to the kView3DPart slot so the
+	// PointGroupClass identity-poke (vertex_loc is already in view space
+	// after CPU pre-transform) doesn't clobber the camera matrix that
+	// kView3D's mesh/terrain submits depend on.
+	if (m_phaseD13cSourceTag == IRenderBackend::kSrcParticle && !m_active2D) {
+		std::memcpy(m_view3DPartMtx, m, sizeof(m_view3DPartMtx));
+		m_view3DPartDirty = true;
+		return;
+	}
 	if (m_active2D) {
 		std::memcpy(m_view2DMtx, m, sizeof(m_view2DMtx));
 		m_view2DDirty = true;
@@ -626,6 +684,16 @@ void BgfxBackend::Set_Projection_Transform(const float m[16])
 	const bool prevActive2D = m_active2D;
 	m_active2D = (fabsf(m[15] - 1.0f) < 1e-4f);
 
+	// Phase D17 — particle draws share the camera's perspective projection;
+	// store it on the kView3DPart slot too. PointGroupClass::Render doesn't
+	// emit its own projection, so this captures whatever the most recent
+	// 3D draw set up.
+	if (m_phaseD13cSourceTag == IRenderBackend::kSrcParticle && !m_active2D) {
+		std::memcpy(m_proj3DPartMtx, m, sizeof(m_proj3DPartMtx));
+		m_view3DPartDirty = true;
+		return;
+	}
+
 	if (m_active2D) {
 		std::memcpy(m_proj2DMtx, m, sizeof(m_proj2DMtx));
 		m_view2DDirty = true;
@@ -642,6 +710,10 @@ void BgfxBackend::Set_Projection_Transform(const float m[16])
 		if (prevActive2D) {
 			std::memcpy(m_view3DMtx, m_view2DMtx, sizeof(m_view3DMtx));
 		}
+		// Mirror the latest 3D camera projection into the particle slot so
+		// kView3DPart projects the same as kView3D when particles arrive.
+		std::memcpy(m_proj3DPartMtx, m, sizeof(m_proj3DPartMtx));
+		m_view3DPartDirty = true;
 	}
 }
 
@@ -729,7 +801,8 @@ void BgfxBackend::Update_Texture_RGBA8(uintptr_t handle,
                                         uint16_t width,
                                         uint16_t height)
 {
-	// Phase 5h.30 — upload `width * height * 4` bytes to the texture at mip 0.
+	// Phase 5h.30 — upload `width * height * 4` bytes to the texture at mip 0,
+	// plus all subsequent mip levels via CPU 2x2 box-filter downscale.
 	// Handle 0 or null pixels is a silent no-op (callers may hold
 	// unallocated handles). bgfx::updateTexture2D copies the data before
 	// returning; callers can free their buffer immediately.
@@ -748,6 +821,60 @@ void BgfxBackend::Update_Texture_RGBA8(uintptr_t handle,
 		/*x=*/0, /*y=*/0,
 		width, height,
 		bgfx::copy(pixels, byteSize));
+
+	// Phase D13b fix — when the texture was created with mipmaps,
+	// bgfx::createTexture2D allocates the full mip chain but every level
+	// past 0 is uninitialized GPU memory until we write it. Procedural
+	// callers (heightmap atlas, surface blit) only know the top-level
+	// pixels, so generate mips here via 2x2 box-filter downscale and
+	// upload each. Without this, distance-based mip selection samples
+	// garbage and renders white rectangles on the terrain.
+	auto mipIt = m_textureMipCounts.find(handle);
+	if (mipIt == m_textureMipCounts.end() || mipIt->second <= 1)
+		return;
+
+	const uint8_t totalMips = mipIt->second;
+	std::vector<uint8_t> src(static_cast<const uint8_t*>(pixels),
+	                         static_cast<const uint8_t*>(pixels) + byteSize);
+	uint16_t srcW = width;
+	uint16_t srcH = height;
+	for (uint8_t mip = 1; mip < totalMips; ++mip)
+	{
+		const uint16_t dstW = static_cast<uint16_t>(srcW > 1 ? srcW / 2 : 1);
+		const uint16_t dstH = static_cast<uint16_t>(srcH > 1 ? srcH / 2 : 1);
+		std::vector<uint8_t> dst(uint32_t(dstW) * uint32_t(dstH) * 4u, 0);
+		for (uint16_t y = 0; y < dstH; ++y)
+		{
+			for (uint16_t x = 0; x < dstW; ++x)
+			{
+				const uint16_t sx = static_cast<uint16_t>(x * 2);
+				const uint16_t sy = static_cast<uint16_t>(y * 2);
+				const uint16_t sx2 = static_cast<uint16_t>(srcW > 1 ? sx + 1 : sx);
+				const uint16_t sy2 = static_cast<uint16_t>(srcH > 1 ? sy + 1 : sy);
+				const uint8_t* p00 = src.data() + (sy  * srcW + sx ) * 4u;
+				const uint8_t* p10 = src.data() + (sy  * srcW + sx2) * 4u;
+				const uint8_t* p01 = src.data() + (sy2 * srcW + sx ) * 4u;
+				const uint8_t* p11 = src.data() + (sy2 * srcW + sx2) * 4u;
+				uint8_t* d = dst.data() + (y * dstW + x) * 4u;
+				for (int c = 0; c < 4; ++c)
+				{
+					const uint32_t s = uint32_t(p00[c]) + uint32_t(p10[c])
+					                 + uint32_t(p01[c]) + uint32_t(p11[c]);
+					d[c] = static_cast<uint8_t>((s + 2u) >> 2);
+				}
+			}
+		}
+		bgfx::updateTexture2D(
+			*owned,
+			/*layer=*/0,
+			mip,
+			/*x=*/0, /*y=*/0,
+			dstW, dstH,
+			bgfx::copy(dst.data(), static_cast<uint32_t>(dst.size())));
+		src   = std::move(dst);
+		srcW  = dstW;
+		srcH  = dstH;
+	}
 }
 
 uintptr_t BgfxBackend::Create_Texture_From_Memory(const void* data, uint32_t size)
@@ -902,19 +1029,22 @@ void BgfxBackend::Set_Sampler_State(unsigned stage, const SamplerStateDesc& samp
 
 void BgfxBackend::UpdateViewOrder()
 {
-	// Default bgfx view order is ascending view ID. RTs (views 2..N) must
-	// submit before the backbuffer views (kView3D=0, kView2D=1) so that any
-	// backbuffer pass sampling an RT reads the freshly rendered frame.
-	// Explicit order: [2, 3, ..., N, kView3D, kView2D]. The 2D HUD view
-	// always draws last so it overlays the 3D scene.
+	// Default bgfx view order is ascending view ID. RTs (views 3..N) must
+	// submit before the backbuffer views (kView3D=0, kView3DPart=2, kView2D=1)
+	// so that any backbuffer pass sampling an RT reads the freshly rendered
+	// frame. Explicit order: [3, 4, ..., N, kView3D, kView3DPart, kView2D].
+	// kView2D always draws last so it overlays the 3D scene; kView3DPart
+	// goes between kView3D and kView2D so particles draw above terrain/meshes
+	// but below HUD.
 	if (m_renderTargets.empty())
 		return;
-	const size_t count = m_renderTargets.size() + 2;   // +1 for kView3D, +1 for kView2D
+	const size_t count = m_renderTargets.size() + 3;   // +kView3D +kView3DPart +kView2D
 	std::vector<bgfx::ViewId> order;
 	order.reserve(count);
 	for (auto* rt : m_renderTargets)
 		order.push_back(rt->viewId);
 	order.push_back(kView3D);
+	order.push_back(kView3DPart);
 	order.push_back(kView2D);
 	bgfx::setViewOrder(0, static_cast<uint16_t>(count), order.data());
 }
@@ -1248,6 +1378,18 @@ bgfx::ProgramHandle BgfxBackend::ApplyDrawState(uint32_t attrMask)
 			m_view2DDirty = false;
 		}
 	}
+	else if (m_phaseD13cSourceTag == IRenderBackend::kSrcParticle)
+	{
+		// Phase D17 — PointGroupClass particles. Pre-transformed-to-view-space
+		// vertices need IDENTITY view here; routing them through the
+		// dedicated kView3DPart prevents that identity matrix from
+		// retroactively erasing kView3D's camera at frame() time.
+		targetView = kView3DPart;
+		if (m_view3DPartDirty) {
+			bgfx::setViewTransform(targetView, m_view3DPartMtx, m_proj3DPartMtx);
+			m_view3DPartDirty = false;
+		}
+	}
 	else
 	{
 		targetView = kView3D;
@@ -1489,6 +1631,17 @@ void BgfxBackend::Draw_Triangles_Dynamic(const void* verts,
 	if (!m_initialized || verts == nullptr || vertexCount == 0)
 		return;
 	InitPipelineResources();
+
+	// [PhaseD13c] per-frame draw-call accounting. Reset by End_Scene.
+	++m_phaseD13cFrameDrawCalls;
+	const unsigned drawTris = (indices != nullptr && indexCount > 0)
+		? (indexCount / 3)
+		: (vertexCount / 3);
+	m_phaseD13cFrameTris += drawTris;
+	if (m_phaseD13cSourceTag < kPhaseD13cSrcCount) {
+		m_phaseD13cSourceCalls[m_phaseD13cSourceTag] += 1;
+		m_phaseD13cSourceTris[m_phaseD13cSourceTag]  += drawTris;
+	}
 
 	// Non-indexed form: indexCount must be 0 (or indices == nullptr). Indexed
 	// form requires a triangle-count's worth of indices.

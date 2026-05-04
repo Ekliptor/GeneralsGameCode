@@ -28,6 +28,7 @@
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
 #include "Lib/BaseType.h"
+#include <cstdio>
 #include "camera.h"
 #include "simplevec.h"
 #include "dx8wrapper.h"
@@ -518,6 +519,18 @@ TextureClass *DummyTexture=nullptr;
 /** Updates video memory surface with currently visible shroud data */
 void W3DShroud::render(CameraClass *cam)
 {
+#ifndef RTS_RENDERER_DX8
+	{
+		static bool s_phaseD13aShroudWarned = false;
+		if (!s_phaseD13aShroudWarned) {
+			s_phaseD13aShroudWarned = true;
+			std::fprintf(stderr,
+				"[PhaseD13a:shroud] firstFire srcTex=%s\n",
+				m_pSrcTexture ? "set" : "null");
+		}
+	}
+#endif
+
 	if (!m_pSrcTexture)
 		return; //nothing to update from.  Must be in reset state.
 

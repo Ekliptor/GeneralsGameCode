@@ -90,8 +90,12 @@ struct ChunkHeader
 	// Chunk type and size.
 	// Note: MSB of ChunkSize is used to indicate whether this chunk
 	// contains other chunks or data.
-	uint32 ChunkType;
-	uint32 ChunkSize;
+	// ON-DISK FIELDS — must be 4 bytes. The legacy `uint32` typedef
+	// resolves to `unsigned long`, which is 8 bytes on 64-bit macOS/Linux
+	// and would silently double sizeof(ChunkHeader), misaligning every
+	// subsequent read in the file. Use fixed-width uint32_t.
+	uint32_t ChunkType;
+	uint32_t ChunkSize;
 };
 
 struct MicroChunkHeader

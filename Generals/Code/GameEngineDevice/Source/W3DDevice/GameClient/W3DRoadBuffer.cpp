@@ -48,6 +48,7 @@
 
 #include "W3DDevice/GameClient/W3DRoadBuffer.h"
 
+#include <cstdio>
 #include <assetmgr.h>
 #include <texture.h>
 #include "Common/GlobalData.h"
@@ -66,6 +67,10 @@
 #include "WW3D2/dx8renderer.h"
 #include "WW3D2/mesh.h"
 #include "WW3D2/meshmdl.h"
+#ifndef RTS_RENDERER_DX8
+#include "WW3D2/IRenderBackend.h"
+#include "WW3D2/RenderBackendRuntime.h"
+#endif
 
 static const Real TEE_WIDTH_ADJUSTMENT = 1.03f;
 
@@ -3222,6 +3227,21 @@ void W3DRoadBuffer::drawRoads(CameraClass * camera, TextureClass *cloudTexture, 
 	m_minY = minY*MAP_XY_FACTOR;
 	m_maxY = maxY*MAP_XY_FACTOR;
 
+#ifndef RTS_RENDERER_DX8
+	{
+		static bool s_phaseD13aRoadsWarned = false;
+		if (!s_phaseD13aRoadsWarned) {
+			s_phaseD13aRoadsWarned = true;
+			std::fprintf(stderr,
+				"[PhaseD13a:roads] firstFire maxRoadTypes=%d cloudTex=%s noiseTex=%s wireframe=%d\n",
+				m_maxRoadTypes,
+				cloudTexture ? "set" : "null",
+				noiseTexture ? "set" : "null",
+				wireframe ? 1 : 0);
+		}
+	}
+#endif
+
 	Int i;
 
 	Int maxStacking = 0;
@@ -3272,6 +3292,10 @@ void W3DRoadBuffer::drawRoads(CameraClass * camera, TextureClass *cloudTexture, 
 				if (!wireframe)
 		 			W3DShaderManager::setShader(st, pass);
 				//Draw all this road type.
+#ifndef RTS_RENDERER_DX8
+				if (IRenderBackend* b = RenderBackendRuntime::Get_Active())
+					b->Set_Source_Tag(IRenderBackend::kSrcRoads);
+#endif
 				DX8Wrapper::Draw_Triangles(	0, m_roadTypes[i].getNumIndices()/3, 0,	m_roadTypes[i].getNumVertices());
 			}
 

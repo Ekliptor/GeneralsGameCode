@@ -33,6 +33,7 @@
 
 // SYSTEM INCLUDES ////////////////////////////////////////////////////////////
 #include <stdlib.h>
+#include <cstdio>
 
 // USER INCLUDES //////////////////////////////////////////////////////////////
 #include "Lib/BaseType.h"
@@ -1154,13 +1155,14 @@ void RTS3DScene::Customized_Render( RenderInfoClass &rinfo )
 	}
 
 	// only render particles once per frame
-#ifdef RTS_RENDERER_DX8
+	// Phase D17 — gate lifted on BGFX too. Particle submits now route to
+	// kView3DPart (BgfxBackend) so PointGroupClass::Render's VIEW=identity
+	// poke doesn't clobber kView3D's camera at frame() time.
 	if (terrainObject != nullptr && TheParticleSystemManager != nullptr &&
 		Get_Extra_Pass_Polygon_Mode() == EXTRA_PASS_DISABLE)
 	{
 		TheParticleSystemManager->queueParticleRender();
 	}
-#endif
 }
 
 /**Convert a player index to a color index, we use this because color indices are
@@ -1224,6 +1226,19 @@ void renderStenciledPlayerColor( UnsignedInt color, UnsignedInt stencilRef, Bool
 	DX8Wrapper::Apply_Render_State_Changes();	//force update all render states
 
 	LPDIRECT3DDEVICE8 m_pDev=DX8Wrapper::_Get_D3D_Device8();
+
+#ifndef RTS_RENDERER_DX8
+	{
+		static bool s_phaseD13aStencilQuadWarned = false;
+		if (!s_phaseD13aStencilQuadWarned) {
+			s_phaseD13aStencilQuadWarned = true;
+			std::fprintf(stderr,
+				"[PhaseD13a:stencilquad] firstFire color=0x%08x stencilRef=%u clear=%d devNull=%d\n",
+				color, stencilRef, clear ? 1 : 0,
+				m_pDev == nullptr ? 1 : 0);
+		}
+	}
+#endif
 
 	if (!m_pDev)
 		return;	//need device to render anything.

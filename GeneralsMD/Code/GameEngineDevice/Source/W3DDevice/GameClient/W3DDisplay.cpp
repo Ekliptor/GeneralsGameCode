@@ -144,6 +144,15 @@ namespace {
 // this, the ZH main menu showed the vanilla "GENERALS" logo because
 // SCSmShellUserInterface512_001.tga resolved to the vanilla archive.
 // Mirrors GameFileClass::Set_Name in W3DFileSystem.cpp for the DX8 path.
+//
+// TheSuperHackers @fix danielw 2026-04-28 (D9) Vanilla Textures.big stores
+// almost all art textures as DXT-compressed .dds, but INIs reference them by
+// .tga name (e.g. `Texture = TRTwoLane6.tga`). The DX8 path silently rewrites
+// .tga→.dds in DDSFileClass; mirror that here by probing the .dds variant of
+// each location BEFORE the .tga path. bgfx/bimg's imageParse auto-detects DDS
+// header bytes, so the same Create_Texture_From_Memory path decodes either.
+// Without this, every vanilla unit/terrain/prop texture (avbattlesh.tga,
+// trtwolane6.tga, ptpalm01.tga, …) failed and meshes rendered as white blocks.
 // Falls back to stdio for absolute / dev paths that don't live in an archive.
 bool readViaFS(const char* path, std::vector<uint8_t>& out)
 {
@@ -158,23 +167,44 @@ bool readViaFS(const char* path, std::vector<uint8_t>& out)
 		return got == size;
 	};
 
-	if (TheFileSystem) {
-		const bool hasSep = std::strchr(path, '/') || std::strchr(path, '\\');
-		if (!hasSep) {
-			AsciiString lang = GetRegistryLanguage();
-			if (!lang.isEmpty()) {
-				std::string localized;
-				localized.reserve(std::strlen(path) + 32 + lang.getLength());
-				localized.append("Data\\").append(lang.str()).append("\\Art\\Textures\\").append(path);
-				if (readFile(localized.c_str(), out)) return true;
+	// Build the .dds twin of a .tga path. Returns empty string if the input
+	// doesn't end in a 3-letter image extension we want to swap.
+	auto ddsTwin = [](const char* p) -> std::string {
+		const std::size_t len = std::strlen(p);
+		if (len < 4) return {};
+		const char* ext = p + len - 4;
+		if (ext[0] != '.') return {};
+		const auto eq = [](char a, char b) { return (a | 0x20) == b; };
+		if (!(eq(ext[1], 't') && eq(ext[2], 'g') && eq(ext[3], 'a'))) return {};
+		std::string out(p, len - 3);
+		out.append("dds");
+		return out;
+	};
+
+	auto probe = [&](const char* p) -> bool {
+		if (TheFileSystem) {
+			const bool hasSep = std::strchr(p, '/') || std::strchr(p, '\\');
+			if (!hasSep) {
+				AsciiString lang = GetRegistryLanguage();
+				if (!lang.isEmpty()) {
+					std::string localized;
+					localized.reserve(std::strlen(p) + 32 + lang.getLength());
+					localized.append("Data\\").append(lang.str()).append("\\Art\\Textures\\").append(p);
+					if (readFile(localized.c_str(), out)) return true;
+				}
+				std::string prefixed;
+				prefixed.reserve(std::strlen(p) + 13);
+				prefixed.append("Art\\Textures\\").append(p);
+				if (readFile(prefixed.c_str(), out)) return true;
 			}
-			std::string prefixed;
-			prefixed.reserve(std::strlen(path) + 13);
-			prefixed.append("Art\\Textures\\").append(path);
-			if (readFile(prefixed.c_str(), out)) return true;
+			if (readFile(p, out)) return true;
 		}
-		if (readFile(path, out)) return true;
-	}
+		return false;
+	};
+
+	std::string dds = ddsTwin(path);
+	if (!dds.empty() && probe(dds.c_str())) return true;
+	if (probe(path)) return true;
 
 	FILE* fh = std::fopen(path, "rb");
 	if (!fh) return false;

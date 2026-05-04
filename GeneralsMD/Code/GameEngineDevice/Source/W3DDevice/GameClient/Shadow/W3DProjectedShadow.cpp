@@ -33,6 +33,7 @@
 
 // USER INCLUDES //////////////////////////////////////////////////////////////
 #include "always.h"
+#include <cstdio>
 #include "GameClient/View.h"
 #include "WW3D2/camera.h"
 #include "WW3D2/light.h"
@@ -684,6 +685,18 @@ void W3DProjectedShadowManager::flushDecals(W3DShadowTexture *texture, ShadowTyp
 	}
 
 	LPDIRECT3DDEVICE8 m_pDev=DX8Wrapper::_Get_D3D_Device8();
+#ifndef RTS_RENDERER_DX8
+	{
+		static bool s_phaseD13aShadowDecalWarned = false;
+		if (!s_phaseD13aShadowDecalWarned) {
+			s_phaseD13aShadowDecalWarned = true;
+			std::fprintf(stderr,
+				"[PhaseD13a:shadowdecal] firstFire verts=%d polys=%d type=%d devNull=%d\n",
+				nShadowDecalVertsInBatch, nShadowDecalPolysInBatch,
+				static_cast<int>(type), m_pDev == nullptr ? 1 : 0);
+		}
+	}
+#endif
 	if (!m_pDev)	return;	//no D3D Device to render
 
 	VertexMaterialClass *vmat=VertexMaterialClass::Get_Preset(VertexMaterialClass::PRELIT_DIFFUSE);

@@ -39,6 +39,7 @@
 
 // USER INCLUDES //////////////////////////////////////////////////////////////
 #include "always.h"
+#include <cstdio>
 #include "GameClient/View.h"
 #include "WW3D2/camera.h"
 #include "WW3D2/light.h"
@@ -3405,6 +3406,17 @@ void W3DVolumetricShadowManager::renderStencilShadows()
 
 void W3DVolumetricShadowManager::renderShadows( Bool forceStencilFill )
 {
+#ifndef RTS_RENDERER_DX8
+	{
+		static bool s_phaseD13aShadowStencilWarned = false;
+		if (!s_phaseD13aShadowStencilWarned) {
+			s_phaseD13aShadowStencilWarned = true;
+			std::fprintf(stderr,
+				"[PhaseD13a:shadowstencil] firstFire forceStencilFill=%d body=stubbed\n",
+				forceStencilFill ? 1 : 0);
+		}
+	}
+#endif
 #ifdef RTS_RENDERER_DX8
 	W3DVolumetricShadow *shadow;
 	Int numRenderedShadows = 0;

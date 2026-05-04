@@ -93,6 +93,27 @@ public:
 	virtual void Destroy_Texture(uintptr_t handle) = 0;
 	virtual void Set_Texture(unsigned stage, uintptr_t handle) = 0;
 
+	// [PhaseD13c] tag the source of the next Draw_Triangles_Dynamic so the
+	// backend can bin per-frame call/triangle counts. Default no-op so
+	// non-bgfx backends and uninstrumented callers stay fine.
+	enum DrawSourceTag : unsigned {
+		kSrcUnknown    = 0,
+		kSrcMeshDirect = 1,
+		kSrcTerrain    = 2,
+		kSrcParticle   = 3,
+		kSrcTracks     = 4,
+		kSrcRoads      = 5,
+		kSrcBibs       = 6,
+		kSrcExtraBlend = 7,
+	};
+	virtual void Set_Source_Tag(unsigned /*tag*/) {}
+
+	// Phase D17c — read the currently-set tag so deferred submitters
+	// (e.g. SortingRendererClass) can capture it at insert time and
+	// re-assert it before flushing each draw, preserving per-source
+	// view-routing (kView3DPart for particles) and counter binning.
+	virtual unsigned Get_Source_Tag() const { return kSrcUnknown; }
+
 	// Phase 5h.36 — diagnostic mip-count accessor for cache-loaded textures.
 	// Returns the number of mip levels the texture was created with
 	// (1 == no mip chain; >1 == pre-baked mips). Returns 0 if the handle

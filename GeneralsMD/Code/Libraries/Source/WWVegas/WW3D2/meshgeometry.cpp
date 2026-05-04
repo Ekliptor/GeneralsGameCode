@@ -1969,10 +1969,10 @@ WW3DErrorType MeshGeometryClass::read_vertex_influences(ChunkLoadClass & cload)
 WW3DErrorType MeshGeometryClass::read_vertex_shade_indices(ChunkLoadClass & cload)
 {
 	uint32 * shade_index = get_shade_indices(true);
-	uint32 si;
+	uint32_t si;
 
 	for (int i=0; i<Get_Vertex_Count(); i++) {
-		if (cload.Read(&si,sizeof(uint32)) != sizeof(uint32)) {
+		if (cload.Read(&si,sizeof(uint32_t)) != sizeof(uint32_t)) {
 			return WW3D_ERROR_LOAD_FAILED;
 		}
 		shade_index[i] = si;

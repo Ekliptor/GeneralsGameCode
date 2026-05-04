@@ -47,6 +47,7 @@
 //-----------------------------------------------------------------------------
 
 #include <stdlib.h>
+#include <cstdio>
 #include <assetmgr.h>
 #include <texture.h>
 #include <tri.h>
@@ -2441,6 +2442,20 @@ water plane.  Applying a custom render to these polygons allows for a smoother l
 transition*/
 void BaseHeightMapRenderObjClass::renderShoreLines(CameraClass *pCamera)
 {
+#ifndef RTS_RENDERER_DX8
+	{
+		static bool s_phaseD13bShorelineWarned = false;
+		if (!s_phaseD13bShorelineWarned) {
+			s_phaseD13bShorelineWarned = true;
+			std::fprintf(stderr,
+				"[PhaseD13b:shoreline] firstFire numShoreLineTiles=%d showSoftWaterEdge=%d transparentDepth=%d\n",
+				m_numShoreLineTiles,
+				TheGlobalData ? (int)TheGlobalData->m_showSoftWaterEdge : -1,
+				TheWaterTransparency ? (int)TheWaterTransparency->m_transparentWaterDepth : -1);
+		}
+	}
+#endif
+
 	if (!TheGlobalData->m_isWorldBuilder)	//use faster version optimized for game and not world builder?
 	{	renderShoreLinesSorted(pCamera);
 		return;

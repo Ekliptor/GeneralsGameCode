@@ -116,7 +116,7 @@ AABTreeClass::AABTreeClass(AABTreeBuilderClass * builder)
 	Nodes = W3DNEWARRAY AABTreeClass::CullNodeStruct[NodeCount];
 
 	PolyCount = builder->Poly_Count();
-	PolyIndices = W3DNEWARRAY uint32[PolyCount];
+	PolyIndices = W3DNEWARRAY uint32_t[PolyCount];
 
 	int curpolyindex = 0;
 	Build_Tree_Recursive(builder->Root,curpolyindex);
@@ -186,8 +186,8 @@ AABTreeClass & AABTreeClass::operator = (const AABTreeClass & that)
 
 	PolyCount = that.PolyCount;
 	if (PolyCount > 0) {
-		PolyIndices = W3DNEWARRAY uint32[PolyCount];
-		memcpy(PolyIndices,that.PolyIndices,PolyCount * sizeof(uint32));
+		PolyIndices = W3DNEWARRAY uint32_t[PolyCount];
+		memcpy(PolyIndices,that.PolyIndices,PolyCount * sizeof(uint32_t));
 	}
 
 	Mesh = that.Mesh;
@@ -1152,7 +1152,7 @@ void AABTreeClass::Load_W3D(ChunkLoadClass & cload)
 	NodeCount = header.NodeCount;
 	PolyCount = header.PolyCount;
 	Nodes = W3DNEWARRAY CullNodeStruct[NodeCount];
-	PolyIndices = W3DNEWARRAY uint32[PolyCount];
+	PolyIndices = W3DNEWARRAY uint32_t[PolyCount];
 
 	while (cload.Open_Chunk()) {
 		switch (cload.Cur_Chunk_ID())
@@ -1184,7 +1184,7 @@ void AABTreeClass::Load_W3D(ChunkLoadClass & cload)
  *=============================================================================================*/
 void AABTreeClass::Read_Poly_Indices(ChunkLoadClass & cload)
 {
-	cload.Read(PolyIndices,sizeof(uint32) * PolyCount);
+	cload.Read(PolyIndices,sizeof(uint32_t) * PolyCount);
 }
 
 

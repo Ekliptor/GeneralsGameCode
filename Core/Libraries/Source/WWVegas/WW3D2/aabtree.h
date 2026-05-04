@@ -205,7 +205,7 @@ private:
 	int						NodeCount;			// number of nodes in the tree
 	CullNodeStruct *		Nodes;				// array of nodes
 	int						PolyCount;			// number of polygons in the parent mesh (and the number of indexes in our array)
-	uint32 *					PolyIndices;		// linear array of polygon indices, nodes index into this array
+	uint32_t *				PolyIndices;		// linear array of polygon indices (4-byte; on-disk format)
 	MeshGeometryClass *	Mesh;					// pointer to the parent mesh (non-ref-counted; we are a member of this mesh)
 
 	friend class MeshClass;

@@ -37,9 +37,11 @@
  * Functions:                                                              *
  * - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-#include "part_emt.h"
+// Phase D16 — gate lifted: BGFX particle pipeline relies on these emitter
+// definitions/instances; pointgr.cpp already submits the actual triangles
+// via the BGFX backend, so we just need the loader-side data structures.
 
-#ifdef RTS_RENDERER_DX8
+#include "part_emt.h"
 #include "wwdebug.h"
 #include "ww3d.h"
 #include "assetmgr.h"
@@ -885,4 +887,3 @@ ParticleEmitterClass::Add_Dependencies_To_List
 	return ;
 }
 
-#endif // RTS_RENDERER_DX8

@@ -46,6 +46,7 @@
 //         Includes
 //-----------------------------------------------------------------------------
 #include <stdlib.h>
+#include <cstdio>
 #include <vector>
 
 #include "W3DDevice/GameClient/TerrainTex.h"
@@ -173,6 +174,52 @@ int TerrainTextureClass::update(WorldHeightMap *htMap)
 	                              staging.data(),
 	                              static_cast<uint16_t>(width),
 	                              static_cast<uint16_t>(height));
+
+	{
+		// [PhaseD13b] Atlas content audit. Sample at the UV coordinates
+		// observed in the heightmap probes (0.064..0.354) — across the
+		// upper-left quadrant of the atlas — to see what texels are
+		// actually present at the locations vertices reference. Histogram
+		// breaks pixels into: zero (RGBA=0), grey (R==G==B>=128), pure
+		// white (255,255,255), and other.
+		Int totalPixels = width * height;
+		Int zeroCount = 0, whiteCount = 0, greyCount = 0, otherCount = 0;
+		const UnsignedByte* px = staging.data();
+		for (Int n = 0; n < totalPixels; ++n) {
+			UnsignedByte r = px[0], g = px[1], b = px[2], a = px[3];
+			if (r == 0 && g == 0 && b == 0 && a == 0) zeroCount++;
+			else if (r == 255 && g == 255 && b == 255) whiteCount++;
+			else if (r == g && g == b && r >= 128) greyCount++;
+			else otherCount++;
+			px += 4;
+		}
+		Int placedCount = 0;
+		for (Int t = 0; t < htMap->m_numBitmapTiles; ++t) {
+			TileData* pT = htMap->getSourceTile(t);
+			if (pT && pT->m_tileLocationInTexture.x > 0) placedCount++;
+		}
+		std::fprintf(stderr,
+			"[PhaseD13b:atlas-base] size=%dx%d numTiles=%d placed=%d "
+			"pixels[zero=%d,white=%d,grey>=128=%d,other=%d] (totalPx=%d)\n",
+			width, height, htMap->m_numBitmapTiles, placedCount,
+			zeroCount, whiteCount, greyCount, otherCount, totalPixels);
+
+		// Sample atlas at vertex UV (0.213, 0.098) — first ZH vertex.
+		auto sampleAt = [&](float u, float v) -> uint32_t {
+			Int sx = static_cast<Int>(u * static_cast<float>(width));
+			Int sy = static_cast<Int>(v * static_cast<float>(height));
+			if (sx < 0) sx = 0; if (sx >= width)  sx = width - 1;
+			if (sy < 0) sy = 0; if (sy >= height) sy = height - 1;
+			const UnsignedByte* p = staging.data() + (sy * width + sx) * 4;
+			return (uint32_t(p[3]) << 24) | (uint32_t(p[0]) << 16) | (uint32_t(p[1]) << 8) | uint32_t(p[2]);
+		};
+		std::fprintf(stderr,
+			"[PhaseD13b:atlas-sample] (0.213,0.098)=0x%08x (0.064,0.098)=0x%08x "
+			"(0.354,0.098)=0x%08x (0.127,0.348)=0x%08x (0.002,0.348)=0x%08x\n",
+			sampleAt(0.213f, 0.098f), sampleAt(0.064f, 0.098f),
+			sampleAt(0.354f, 0.098f), sampleAt(0.127f, 0.348f),
+			sampleAt(0.002f, 0.348f));
+	}
 	return height;
 #else
 	// D3DTexture is our texture;

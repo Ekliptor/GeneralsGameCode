@@ -44,6 +44,8 @@
 //-----------------------------------------------------------------------------
 
 #include "W3DDevice/GameClient/W3DTerrainTracks.h"
+
+#include <cstdio>
 #include "W3DDevice/GameClient/HeightMap.h"
 #include "Common/PerfTimer.h"
 #include "Common/GlobalData.h"
@@ -56,6 +58,10 @@
 #include "assetmgr.h"
 #include "WW3D2/dx8wrapper.h"
 #include "WW3D2/scene.h"
+#ifndef RTS_RENDERER_DX8
+#include "WW3D2/IRenderBackend.h"
+#include "WW3D2/RenderBackendRuntime.h"
+#endif
 #include "GameLogic/TerrainLogic.h"
 #include "GameLogic/Object.h"
 #include "GameClient/Drawable.h"
@@ -799,6 +805,18 @@ Try improving the fit to vertical surfaces like cliffs.
 	if (!mod)
 		return;	//nothing to render
 
+#ifndef RTS_RENDERER_DX8
+	{
+		static bool s_phaseD13bTracksFirst = false;
+		if (!s_phaseD13bTracksFirst) {
+			s_phaseD13bTracksFirst = true;
+			std::fprintf(stderr,
+				"[PhaseD13b:tracks] firstFire edgesToFlush=%d (probe quiet after first; D13c will re-instrument if needed)\n",
+				m_edgesToFlush);
+		}
+	}
+#endif
+
 	Int	trackStartIndex;
 	Real distanceFade;
 
@@ -902,6 +920,10 @@ Try improving the fit to vertical surfaces like cliffs.
 			{
 				DX8Wrapper::Set_Texture(0,mod->m_stageZeroTexture);
 				DX8Wrapper::Set_Index_Buffer_Index_Offset(trackStartIndex);
+#ifndef RTS_RENDERER_DX8
+				if (IRenderBackend* b = RenderBackendRuntime::Get_Active())
+					b->Set_Source_Tag(IRenderBackend::kSrcTracks);
+#endif
 				DX8Wrapper::Draw_Triangles(	0,(mod->m_activeEdgeCount-1)*2, 0, mod->m_activeEdgeCount*2);
 
 				trackStartIndex += mod->m_activeEdgeCount*2;

@@ -677,6 +677,31 @@ void MeshClass::Render(RenderInfoClass & rinfo)
 		m_materialPassAlphaOverride = rinfo.materialPassAlphaOverride;
 		m_materialPassEmissiveOverride = rinfo.materialPassEmissiveOverride;
 
+#ifndef RTS_RENDERER_DX8
+		// Phase D11 diagnostic: log every unique mesh that gets deferred to
+		// the static-sort list. In BGFX mode CurrentStaticSortLists is null
+		// (ww3d.cpp), so deferred meshes are silently dropped. One-shot per
+		// mesh name; tally feeds the staticsort-null line in ww3d.cpp.
+		{
+			static const char* seenSort[256] = {};
+			static int seenSortCount = 0;
+			const char* mname = Model ? Model->Get_Name() : nullptr;
+			if (mname == nullptr) mname = "<unnamed>";
+			bool already = false;
+			for (int i = 0; i < seenSortCount; ++i) {
+				if (seenSort[i] == mname || strcmp(seenSort[i], mname) == 0) {
+					already = true; break;
+				}
+			}
+			if (!already && seenSortCount < 256) {
+				seenSort[seenSortCount++] = mname;
+				fprintf(stderr,
+					"[PhaseD11:staticsort-defer] name=%s sortLevel=%u\n",
+					mname, sort_level);
+			}
+			++g_PhaseD11_StaticSortDeferCount;
+		}
+#endif
 		WW3D::Add_To_Static_Sort_List(this, sort_level);
 
 	} else {
@@ -703,9 +728,31 @@ void MeshClass::Render(RenderInfoClass & rinfo)
 				// then because Add_Render_Task / Flush are stubbed.
 				if (Model->PolygonRendererList.Is_Empty()) {
 #ifndef RTS_RENDERER_DX8
-					if (WW3D2::Render_Mesh_Direct_Bgfx(*this, rinfo))
-						return;
-#endif
+					{
+						WW3D2::DirectSubmitStatus dsr =
+							WW3D2::Render_Mesh_Direct_Bgfx(*this, rinfo);
+						if (dsr == WW3D2::kDirectSubmit_Submitted)
+							return;
+						// Phase D11: per-mesh fall-through detail (replaces the
+						// latched [PhaseD7-warn]). One-shot per mesh name.
+						static const char* seenFall[256] = {};
+						static int seenFallCount = 0;
+						const char* mname = Model ? Model->Get_Name() : nullptr;
+						if (mname == nullptr) mname = "<unnamed>";
+						bool already = false;
+						for (int i = 0; i < seenFallCount; ++i) {
+							if (seenFall[i] == mname || strcmp(seenFall[i], mname) == 0) {
+								already = true; break;
+							}
+						}
+						if (!already && seenFallCount < 256) {
+							seenFall[seenFallCount++] = mname;
+							fprintf(stderr,
+								"[PhaseD11:fallthrough] name=%s reason=%s\n",
+								mname, WW3D2::Direct_Submit_Status_Name(dsr));
+						}
+					}
+#else
 					static bool s_warnedEmpty = false;
 					if (!s_warnedEmpty) {
 						s_warnedEmpty = true;
@@ -714,6 +761,7 @@ void MeshClass::Render(RenderInfoClass & rinfo)
 							"direct-submit fell through (skin / no model / "
 							"empty geometry).\n");
 					}
+#endif
 					return;
 				}
 				WWASSERT(!Model->PolygonRendererList.Is_Empty());

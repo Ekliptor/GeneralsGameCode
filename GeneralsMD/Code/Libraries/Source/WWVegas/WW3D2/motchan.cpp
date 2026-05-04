@@ -44,10 +44,12 @@
  * - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
 
+// Phase D15 — gate lifted: motchan.cpp is fully BGFX-clean (math + chunk
+// reader, no DX8 calls), so it now compiles for both renderer paths.
+// The duplicate stubs in ww3d2_bgfx_stubs.cpp were hiding these real
+// implementations and forcing channels to return zero-motion data.
+
 #include "motchan.h"
-
-#ifdef RTS_RENDERER_DX8
-
 #include "w3d_file.h"
 #include "chunkio.h"
 #include "Vector.h"
@@ -1314,8 +1316,6 @@ return;
 
 
 // EOF - motchan.cpp
-
-#endif // RTS_RENDERER_DX8
 
 // TODO Phase 5h — bgfx-side stubs for MotionChannelClass/BitChannelClass/
 // TimeCodedMotionChannelClass/AdaptiveDeltaMotionChannelClass/
