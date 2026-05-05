@@ -1015,7 +1015,6 @@ WinInputReturnCode GameWindowManager::winProcessMouseEvent( GameWindowMessage ms
 				if( window == nullptr )
 					window = findWindowUnderMouse(toolTipWindow, mousePos, WIN_STATUS_BELOW, WIN_STATUS_HIDDEN);
 			}
-
 			if( window )
 				if( BitIsSet( window->m_status, WIN_STATUS_NO_INPUT ) )
 				{

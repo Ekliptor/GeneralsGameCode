@@ -655,6 +655,17 @@ TextureClass * W3DAssetManager::Recolor_Texture_One_Time(TextureClass *texture, 
 	// if texture is procedural return nullptr
 	if (name && name[0]=='!') return nullptr;
 
+#ifndef RTS_RENDERER_DX8
+	// Phase D18 — TextureClass::Get_Surface_Level() requires Peek_D3D_Texture()
+	// which is always nullptr on the BGFX path; the recolor pipeline would
+	// build a 0x0 surface and a TextureClass with no bgfx handle, leaving the
+	// mesh bound to the placeholder white texture. Returning nullptr makes
+	// Recolor_Mesh skip the texture-replace step so skin units render with
+	// their bare ZHC* base texture (no team-color tint, but visible content).
+	(void)color;
+	return nullptr;
+#endif
+
 	// make sure texture is loaded
 	if (!texture->Is_Initialized())
 		TextureLoader::Request_Foreground_Loading(texture);
@@ -1526,6 +1537,15 @@ TextureClass * W3DAssetManager::Recolor_Texture_One_Time(TextureClass *texture, 
 
 	// if texture is procedural return nullptr
 	if (name && name[0]=='!') return nullptr;
+
+#ifndef RTS_RENDERER_DX8
+	// Phase D18 — same Get_Surface_Level limitation as the team-color variant
+	// above: no GPU readback wired on BGFX, so the recolor pipeline produces
+	// a TextureClass with no bgfx handle. Bail so the original texture stays
+	// bound.
+	(void)hsv_shift;
+	return nullptr;
+#endif
 
 	// make sure texture is loaded
 	if (!texture->Is_Initialized())

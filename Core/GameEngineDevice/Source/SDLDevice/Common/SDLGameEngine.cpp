@@ -161,6 +161,7 @@ namespace
 
 void SDLGameEngine::serviceWindowsOS()
 {
+	if (!s_mouseScaleSeeded) refreshMouseScale();
 	SDL_Event e;
 	while (SDL_PollEvent(&e))
 	{

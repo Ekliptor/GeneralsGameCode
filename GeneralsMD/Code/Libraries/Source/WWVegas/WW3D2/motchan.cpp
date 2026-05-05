@@ -383,7 +383,7 @@ bool TimeCodedMotionChannelClass::Load_W3D(ChunkLoadClass & cload)
 {
 	int size = cload.Cur_Chunk_Length();
 	unsigned int datasize = size - sizeof(W3dTimeCodedAnimChannelStruct);
-	unsigned int numInts  = (datasize / sizeof(uint32)) + 1;
+	unsigned int numInts  = (datasize / sizeof(uint32_t)) + 1;
 
 	W3dTimeCodedAnimChannelStruct chan;
 	if (cload.Read(&chan,sizeof(W3dTimeCodedAnimChannelStruct)) != sizeof(W3dTimeCodedAnimChannelStruct)) {
@@ -398,7 +398,7 @@ bool TimeCodedMotionChannelClass::Load_W3D(ChunkLoadClass & cload)
 	CachedIdx	 = 0;
 	LastTimeCodeIdx = (NumTimeCodes-1) * PacketSize;
 
-	Data = MSGW3DNEWARRAY("TimeCodedMotionChannelClass::Data") uint32[numInts];
+	Data = MSGW3DNEWARRAY("TimeCodedMotionChannelClass::Data") uint32_t[numInts];
 	Data[0] = chan.Data[0];
 
 	if (cload.Read(&(Data[1]), datasize) != datasize) {
@@ -762,11 +762,11 @@ bool TimeCodedBitChannelClass::Load_W3D(ChunkLoadClass & cload)
 	DefaultVal = chan.DefaultVal;
 	CachedIdx = 0;
 
-	uint32 bytesleft = (NumTimeCodes - 1) * sizeof(uint32);
+	uint32_t bytesleft = (NumTimeCodes - 1) * sizeof(uint32_t);
 
 	assert((sizeof(W3dTimeCodedBitChannelStruct) + bytesleft) == (unsigned)chunk_size);
 
-	Bits = MSGW3DNEWARRAY("TimeCodedBitChannelClass::Bits") uint32[NumTimeCodes];
+	Bits = MSGW3DNEWARRAY("TimeCodedBitChannelClass::Bits") uint32_t[NumTimeCodes];
 	assert(Bits);
 
 	Bits[0] = chan.Data[0];
@@ -930,7 +930,7 @@ bool AdaptiveDeltaMotionChannelClass::Load_W3D(ChunkLoadClass & cload)
 {
 	int size = cload.Cur_Chunk_Length();
 	unsigned int datasize = size - sizeof(W3dAdaptiveDeltaAnimChannelStruct);
-	unsigned int numInts  = (datasize / sizeof(uint32)) + 1;
+	unsigned int numInts  = (datasize / sizeof(uint32_t)) + 1;
 
 	W3dAdaptiveDeltaAnimChannelStruct chan;
 	if (cload.Read(&chan,sizeof(W3dAdaptiveDeltaAnimChannelStruct)) != sizeof(W3dAdaptiveDeltaAnimChannelStruct)) {
@@ -945,7 +945,7 @@ bool AdaptiveDeltaMotionChannelClass::Load_W3D(ChunkLoadClass & cload)
 	CacheFrame	= 0x7FFFFFFF;	// a big number, so we know its not valid
 	CacheData   = MSGW3DNEWARRAY("AdaptiveDeltaMotionChannelClass::CacheData") float[VectorLen * 2]; // cacheframe & cachedframe+1 by VectorLen
 
-	Data = MSGW3DNEWARRAY("AdaptiveDeltaMotionChannelClass::Data") uint32[numInts];
+	Data = MSGW3DNEWARRAY("AdaptiveDeltaMotionChannelClass::Data") uint32_t[numInts];
 	Data[0] = chan.Data[0];
 
 	if (cload.Read(&(Data[1]), datasize) != datasize) {

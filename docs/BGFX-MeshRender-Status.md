@@ -988,6 +988,68 @@ opaque-black D17b artefacts), and vanilla shows the full demo scene
 with palm trees / domed building / vehicles intact. No regressions in
 mesh / terrain / road rendering.
 
+### Phase D18 — Skin-mesh white-silhouette fix (skip texture recolor on BGFX)  *(landed 2026-05-05)*
+
+After D17c the ZH demo-battle still showed infantry as small white
+silhouettes near the top of the screen (`UIRGRD_SKN`, `UITRST_SKN`,
+`UITUNF_SKN`). `[PhaseD11:directsubmit]` reported their texture stage
+as `#-16711936#zhca_uirguard.tga` (and similar for the other two skin
+units) — the W3D house-color recolor pipeline had run on the parent
+HLOD and written a per-instance recoloured `TextureClass` into the
+material.
+
+Root cause:
+
+1. `W3DAssetManager::Recolor_Asset` → `Recolor_Mesh` → `Recolor_Texture`
+   → `Recolor_Texture_One_Time` (Generals + GeneralsMD copies).
+2. `Recolor_Texture_One_Time` calls `texture->Get_Surface_Level(0)` to
+   pull the original ZHCA pixels for palette remapping.
+3. `TextureClass::Get_Surface_Level` requires a non-null
+   `Peek_D3D_Texture()` (calls `GetSurfaceLevel(level, &d3d_surface)`).
+   On the BGFX path that pointer is permanently nullptr — texture data
+   lives in `BgfxTextureCache` handles, not in a `IDirect3DTexture8`.
+4. `Get_Surface_Level` returns nullptr; `desc` from `Get_Level_Description`
+   is left zero-init; `newsurf = NEW_REF(SurfaceClass, (0, 0, fmt))` is
+   a 0×0 surface; `NEW_REF(TextureClass, (newsurf, ...))` skips the
+   `Width && Height` guard in the surface-ctor (`texture.cpp:618`) and
+   never calls `Create_Texture_RGBA8` → final `TextureClass` has bgfx
+   handle = 0 → bound stage falls back to the placeholder white texture
+   in the BGFX backend.
+
+Implementation (both `Generals/` and `GeneralsMD/`
+`W3DDevice/GameClient/W3DAssetManager.cpp`): early-return `nullptr` on
+the BGFX branch from both overloads of `Recolor_Texture_One_Time`
+(team-color `int` and `Vector3 hsv_shift`). `Recolor_Mesh`'s `if
+(newtex)` guard then leaves the original texture bound on the mesh,
+so skin units render their bare ZHCA base texture. They lose the
+team-color tint until a proper BGFX recolor pipeline lands, but visible
+content beats white silhouettes.
+
+**Verification** (`/tmp/{zh,vv}-d18.stderr` + `~/Desktop/d18-{zh,vv}.png`):
+
+| skin mesh | pre-D18 stage0 | post-D18 stage0 |
+|-----------|----------------|------------------|
+| UIRGRD_SKN.REPGRD_SKN | `#-16711936#zhca_uirguard.tga` (no bgfx handle → white) | `zhca_uirguard.tga` (loaded via BgfxTextureCache) |
+| UITRST_SKN.UITRST_SKIN | `#-16711936#zhca_uiter.tga` | `zhca_uiter.tga` |
+| UITUNF_SKN.UITUNF_SKN | `#-16711936#zhca_uirtunfan.tga` | `zhca_uirtunfan.tga` |
+| UITUNF_SKN.WARHEAD | `#-16711936#zhca_uirtunfan.tga` | `zhca_uirtunfan.tga` |
+
+`[PhaseD13c:framedraw]` and `[PhaseD13c:meshtop]` numbers are unchanged
+post-D18 (mesh=120/11636 @ f300, particle=330/676 @ f300, top-12
+unchanged). The skin units are now visible as small textured infantry
+shapes near the top of `~/Desktop/d18-zh.png` instead of the pure
+white blobs in `~/Desktop/d17c2-zh.png`. Vanilla menu screenshot is
+visually identical to `~/Desktop/d17c2-vv.png` (no `Recolor_Asset` is
+ever called for the cobblestone-courtyard scene).
+
+`AVBATTLESH.HOUSECOLOR01` etc. are *not* affected by this issue —
+their texture stage was already `housecolor.tga` / `housecolor2.tga`
+(no `#NNNN#` prefix) because they go through `Recolor_Vertex_Material`
+(modifies the vertex material's diffuse color, no texture replacement)
+rather than `Recolor_Texture`.
+
+Memory: `bgfx_recolor_texture_one_time_d18.md`.
+
 ### Phase D13d — Static-sort list flush  *(deferred indefinitely)*
 
 D11 showed **0 meshes deferred** in the ZH menu — every mesh in the

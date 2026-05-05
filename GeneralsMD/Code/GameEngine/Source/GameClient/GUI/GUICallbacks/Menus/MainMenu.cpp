@@ -1032,6 +1032,15 @@ WindowMsgHandledType MainMenuSystem( GameWindow *window, UnsignedInt msg,
 		{
 			GameWindow *control = (GameWindow *)mData1;
 			Int controlID = control->winGetWindowId();
+
+			// Play hover SFX directly. Vanilla relies on map-script hooks
+			// (signalUIInteract below) to fire the audio, which the BGFX/SDL
+			// shell does not exercise reliably; submenus like ChallengeMenu
+			// already trigger GUILogoMouseOver from their own GBM_MOUSE_ENTERING.
+			AudioEventRTS hoverSound("GUILogoMouseOver");
+			if (TheAudio)
+				TheAudio->addAudioEvent(&hoverSound);
+
 			if(controlID == onlineID)
 			{
 				TheScriptEngine->signalUIInteract(TheShellHookNames[SHELL_SCRIPT_HOOK_MAIN_MENU_ONLINE_HIGHLIGHTED]);

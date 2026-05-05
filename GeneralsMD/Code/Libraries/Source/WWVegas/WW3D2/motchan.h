@@ -236,7 +236,7 @@ private:
 	uint32	LastTimeCodeIdx;	// absolute index to last time code
 	uint32	CachedIdx;			// Last Index Used
 
-	uint32	*	Data;			 	// pointer to packet data
+	uint32_t	*	Data;			 	// pointer to packet data (4-byte words; on-disk format is 4-byte packed)
 
 	void 		Free();
 	void 		set_identity(float * setvec);
@@ -272,7 +272,7 @@ private:
 
 	float		Scale;				// Scale Filter, this much
 
-	uint32  *Data;				 	// pointer to packet data
+	uint32_t  *Data;				 	// pointer to packet data (4-byte words; on-disk format is 4-byte packed)
 
 	uint32	CacheFrame;
 	float	  *CacheData;			// the data for CachedFrame, and CachedFrame+1, x VectorLen
@@ -318,7 +318,7 @@ private:
 	uint32	NumTimeCodes;
 	uint32	CachedIdx;
 
-	uint32	*Bits;
+	uint32_t	*Bits;
 
 	void Free();
 
