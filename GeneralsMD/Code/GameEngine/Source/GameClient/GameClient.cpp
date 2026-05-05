@@ -652,6 +652,29 @@ void GameClient::update()
 	{
 		if (TheWritableGlobalData->m_screenshotCountdownFrames > 0)
 		{
+			// `-skirmishScreenshot` scroll trigger: 60 frames before the
+			// capture fires, drive a deterministic tactical-view scroll so
+			// scroll-induced rendering bugs (e.g. BGFX black-after-scroll)
+			// manifest in the captured frame.
+			if (TheGlobalData->m_screenshotScrollFirst
+				&& TheGameLogic && TheGameLogic->isInGame()
+				&& TheTacticalView
+				&& TheWritableGlobalData->m_screenshotCountdownFrames == 60)
+			{
+				// Edge-scroll-sized delta: matches what mouse-at-screen-edge
+				// produces. Tiny — `W3DView::scrollBy` →
+				// `Device_To_View_Space` produces NaN for any non-zero delta
+				// on the BGFX path because `Get_Render_Target_Resolution`
+				// returns the bgfx swap-chain dims (1600x1200) while the
+				// tactical view's `getWidth/getHeight` returns the logical
+				// resolution (800x600). Tracked separately as a camera-math
+				// regression; the routing fix in `Render2DClass::Render` /
+				// `BgfxBackend::Set_View_Transform` is independent.
+				Coord2D delta;
+				delta.x = 0.05f;
+				delta.y = 0.0f;
+				TheTacticalView->scrollBy(&delta);
+			}
 			TheWritableGlobalData->m_screenshotCountdownFrames--;
 		}
 		else

@@ -191,10 +191,23 @@ void W3DView::setHeight(Int height)
 	// extend View functionality
 	View::setHeight(height);
 
+	// Guard against div-by-zero: when the W3DView is sized before
+	// TheDisplay's dimensions have been published, getHeight()==0 here
+	// produces an infinite aspect ratio → tan(inf) = NaN inside Camera's
+	// ViewPlane setup → every Device_To_View_Space call returns NaN
+	// forever, which propagates into setPosition during the first scroll
+	// and freezes the 3D scene at black. Skip the camera-side updates
+	// until both view dimensions are valid; setWidth/setHeight will be
+	// re-issued once they are.
+	if (height <= 0)
+		return;
+
 	Vector2 vMin,vMax;
-	m_3DCamera->Set_Aspect_Ratio((Real)getWidth()/(Real)height);
+	if (getWidth() > 0)
+		m_3DCamera->Set_Aspect_Ratio((Real)getWidth()/(Real)height);
  	m_3DCamera->Get_Viewport(vMin,vMax);
- 	vMax.Y=(Real)(m_originY+height)/(Real)TheDisplay->getHeight();
+ 	if (TheDisplay && TheDisplay->getHeight() > 0)
+ 		vMax.Y=(Real)(m_originY+height)/(Real)TheDisplay->getHeight();
  	m_3DCamera->Set_Viewport(vMin,vMax);
 
 	// TheSuperHackers @bugfix Now recalculates the camera constraints because
@@ -211,15 +224,22 @@ void W3DView::setWidth(Int width)
 	// extend View functionality
 	View::setWidth(width);
 
+	// See setHeight above for the rationale on these guards.
+	if (width <= 0)
+		return;
+
 	Vector2 vMin,vMax;
-	m_3DCamera->Set_Aspect_Ratio((Real)width/(Real)getHeight());
+	if (getHeight() > 0)
+		m_3DCamera->Set_Aspect_Ratio((Real)width/(Real)getHeight());
  	m_3DCamera->Get_Viewport(vMin,vMax);
- 	vMax.X=(Real)(m_originX+width)/(Real)TheDisplay->getWidth();
+ 	if (TheDisplay && TheDisplay->getWidth() > 0)
+ 		vMax.X=(Real)(m_originX+width)/(Real)TheDisplay->getWidth();
  	m_3DCamera->Set_Viewport(vMin,vMax);
 
 	//we want to maintain the same scale, so we'll need to adjust the fov.
 	//default W3D fov for full-screen is 50 degrees.
-	m_3DCamera->Set_View_Plane((Real)width/(Real)TheDisplay->getWidth()*DEG_TO_RADF(50.0f),-1);
+	if (TheDisplay && TheDisplay->getWidth() > 0)
+		m_3DCamera->Set_View_Plane((Real)width/(Real)TheDisplay->getWidth()*DEG_TO_RADF(50.0f),-1);
 
 	m_cameraAreaConstraintsValid = false;
 	m_recalcCamera = true;
@@ -257,6 +277,7 @@ void W3DView::buildCameraPosition( Vector3& sourcePos, Vector3& targetPos )
 	Real angle = getAngle();
 	Real pitch = getPitch();
 	Coord3D pos = *getPosition();
+
 
 	// add in the camera shake, if any
 	pos.x += m_shakeOffset.x;
@@ -750,6 +771,7 @@ void W3DView::setCameraTransform()
 	Matrix3D cameraTransform;
 	buildCameraTransform(&cameraTransform, sourcePos, targetPos);
 	m_3DCamera->Set_Transform( cameraTransform );
+
 
 	if (TheTerrainRenderObject)
 	{
@@ -2015,6 +2037,7 @@ void W3DView::scrollBy( const Coord2D *delta )
 		world.X = worldEnd.X - worldStart.X;
 		world.Y = worldEnd.Y - worldStart.Y;
 		world.Z = worldEnd.Z - worldStart.Z;
+
 
 		// scroll by delta
 		Coord3D pos = *getPosition();

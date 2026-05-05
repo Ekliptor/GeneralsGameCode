@@ -369,6 +369,8 @@ public:
 	Int m_screenshotCountdownFrames;	///< frames to wait after the shell becomes active before taking the screenshot
 	Bool m_autoSkirmish;							///< -skirmish: when true, GameClient auto-launches a 1v1 skirmish after the shell is active
 	AsciiString m_autoSkirmishMap;		///< optional explicit map for -skirmish; empty = pick first multiplayer map from cache
+	AsciiString m_autoSkirmishFaction;	///< -skirmishFaction <name>: override slot 0's PlayerTemplate (e.g. "FactionAmerica"); empty = use SkirmishPreferences value
+	Bool m_screenshotScrollFirst;			///< -skirmishScreenshot: drive a deterministic scroll a few frames before capture, to repro scroll-induced rendering bugs
 	Bool m_allowExitOutOfMovies;			///< flag to allow exit out of movies only after the Intro has played
 
 	Bool m_loadScreenRender;						///< flag to disallow rendering of almost everything during a loadscreen

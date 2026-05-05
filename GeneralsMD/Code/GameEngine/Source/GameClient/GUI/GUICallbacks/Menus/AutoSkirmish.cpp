@@ -9,11 +9,15 @@
 
 #include "Common/GlobalData.h"
 #include "Common/MessageStream.h"
+#include "Common/NameKeyGenerator.h"
+#include "Common/PlayerTemplate.h"
 #include "Common/RandomValue.h"
 #include "Common/SkirmishPreferences.h"
 #include "GameLogic/GameLogic.h"
 #include "GameClient/MapUtil.h"
 #include "GameNetwork/GameInfo.h"
+
+#include <cstdio>
 
 extern SkirmishGameInfo *TheSkirmishGameInfo;
 
@@ -42,7 +46,29 @@ Bool TryAutoSkirmishLaunch(const AsciiString& explicitMap)
 	localSlot.setName(prefs.getUserName());
 	localSlot.setState(SLOT_PLAYER, prefs.getUserName());
 	localSlot.setColor(prefs.getPreferredColor());
-	localSlot.setPlayerTemplate(prefs.getPreferredFaction());
+
+	Int factionIdx = prefs.getPreferredFaction();
+	const AsciiString& factionOverride = TheGlobalData->m_autoSkirmishFaction;
+	if (!factionOverride.isEmpty() && ThePlayerTemplateStore != NULL)
+	{
+		const NameKeyType key = TheNameKeyGenerator->nameToKey(factionOverride);
+		const PlayerTemplate* tmpl = ThePlayerTemplateStore->findPlayerTemplate(key);
+		if (tmpl != NULL && !tmpl->getStartingBuilding().isEmpty())
+		{
+			factionIdx = ThePlayerTemplateStore->getTemplateNumByName(factionOverride);
+			std::fprintf(stderr,
+				"[AutoSkirmish] -skirmishFaction override: %s -> templateIdx=%d\n",
+				factionOverride.str(), factionIdx);
+		}
+		else
+		{
+			std::fprintf(stderr,
+				"[AutoSkirmish] -skirmishFaction '%s' not found or has no starting building; "
+				"falling back to SkirmishPreferences default (idx=%d)\n",
+				factionOverride.str(), factionIdx);
+		}
+	}
+	localSlot.setPlayerTemplate(factionIdx);
 	TheSkirmishGameInfo->setSlot(0, localSlot);
 
 	GameSlot aiSlot;

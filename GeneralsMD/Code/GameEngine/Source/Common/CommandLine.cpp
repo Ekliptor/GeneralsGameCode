@@ -863,6 +863,59 @@ Int parseSkirmish(char *args[], int num)
 	return 1;
 }
 
+// `-skirmishScreenshot <path> [<map>] [<faction>]` — convenience wrapper.
+// Combines `-skirmish` and `-screenshot` so a single CLI invocation boots
+// straight into a skirmish, runs a deterministic scroll a few frames in, and
+// captures the back buffer to <path>. Used to repro scroll-induced rendering
+// bugs (e.g. the BGFX in-game black-screen-after-scroll regression) without
+// hand-driving the menu UI. Optional <map> overrides the preferred map;
+// optional <faction> overrides slot 0's PlayerTemplate (e.g. "FactionAmerica"
+// or "FactionChina") so faction-specific rendering bugs are repeatable
+// without editing Skirmish.ini between runs.
+Int parseSkirmishScreenshot(char *args[], int num)
+{
+	if (num <= 1)
+		return 1;
+
+	TheWritableGlobalData->m_screenshotPath        = args[1];
+	TheWritableGlobalData->m_screenshotCountdownFrames = 1500;
+	TheWritableGlobalData->m_screenshotScrollFirst = TRUE;
+
+	TheWritableGlobalData->m_autoSkirmish = TRUE;
+	TheWritableGlobalData->m_playIntro    = FALSE;
+	TheWritableGlobalData->m_afterIntro   = TRUE;
+	TheWritableGlobalData->m_playSizzle   = FALSE;
+	TheWritableGlobalData->m_shellMapOn   = FALSE;
+
+	Int consumed = 2;
+	if (num > consumed && args[consumed] && args[consumed][0] != '-')
+	{
+		TheWritableGlobalData->m_autoSkirmishMap = args[consumed];
+		ConvertShortMapPathToLongMapPath(TheWritableGlobalData->m_autoSkirmishMap);
+		++consumed;
+	}
+	if (num > consumed && args[consumed] && args[consumed][0] != '-')
+	{
+		TheWritableGlobalData->m_autoSkirmishFaction = args[consumed];
+		++consumed;
+	}
+	return consumed;
+}
+
+// `-skirmishFaction <name>` — override the local slot's faction in
+// `-skirmish` / `-skirmishScreenshot`. Accepts a PlayerTemplate name as
+// declared in `Data\INI\PlayerTemplate.ini` (e.g. "FactionAmerica",
+// "FactionChina", "FactionGLA"). Resolution happens in
+// AutoSkirmish::TryAutoSkirmishLaunch — invalid names fall back to the
+// SkirmishPreferences default with a stderr warning.
+Int parseSkirmishFaction(char *args[], int num)
+{
+	if (num <= 1 || args[1] == nullptr || args[1][0] == '-')
+		return 1;
+	TheWritableGlobalData->m_autoSkirmishFaction = args[1];
+	return 2;
+}
+
 // `-screenshot <path>` — arm a one-shot main-menu screenshot to <path> and
 // skip the EA logo + Sizzle intros so we reach the main menu immediately.
 // The actual capture happens in GameClient::update once the shell is
@@ -1240,6 +1293,8 @@ static CommandLineParam paramsForEngineInit[] =
 	{ "-nologo", parseNoLogo }, // TheSuperHackers @tweak Is now available in Release builds.
 	{ "-screenshot", parseScreenshot },
 	{ "-skirmish", parseSkirmish },
+	{ "-skirmishScreenshot", parseSkirmishScreenshot },
+	{ "-skirmishFaction", parseSkirmishFaction },
 	{ "-noshellmap", parseNoShellMap },
 	{ "-noShellAnim", parseNoWindowAnimation }, // TheSuperHackers @tweak Is now available in Release builds.
 	{ "-xres", parseXRes },

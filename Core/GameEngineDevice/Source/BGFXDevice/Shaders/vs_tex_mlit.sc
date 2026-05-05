@@ -30,6 +30,12 @@ uniform vec4 u_lightSpotArr[4];
 uniform vec4 u_lightSpecArr[4];
 uniform vec4 u_materialSpec;
 uniform vec4 u_fogRange;
+// material.diffuse.rgb + material.opacity (already uploaded by BgfxBackend
+// for every program; only fs_solid read it before). Folding it into v_color0
+// here lets HOUSECOLOR meshes inherit the team-color tint that
+// W3DAssetManager::Recolor_Vertex_Material writes into the vmat. Default
+// vmat diffuse is (1,1,1), so non-recolored meshes are bit-for-bit unchanged.
+uniform vec4 u_solidColor;
 
 void main()
 {
@@ -75,7 +81,7 @@ void main()
 		specular    += u_lightSpecArr[i].rgb * specF * common;
 	}
 
-	v_color0    = vec4(a_color0.rgb * lighting, a_color0.a);
+	v_color0    = vec4(a_color0.rgb * lighting * u_solidColor.rgb, a_color0.a * u_solidColor.a);
 	v_specular  = u_materialSpec.rgb * specular;
 	v_texcoord0 = a_texcoord0;
 

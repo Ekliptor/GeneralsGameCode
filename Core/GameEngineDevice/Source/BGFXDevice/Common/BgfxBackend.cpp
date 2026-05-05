@@ -665,7 +665,15 @@ void BgfxBackend::Set_View_Transform(const float m[16])
 		m_view3DPartDirty = true;
 		return;
 	}
-	if (m_active2D) {
+	// Phase F — when Render2DClass tagged this submit as 2D-UI, route into
+	// the 2D slot regardless of m_active2D. When the caller is anything
+	// else (3D mesh, terrain, particle in 2D-active mode), route into the
+	// 3D slot regardless of m_active2D. The proj[15]==1 heuristic alone
+	// can't distinguish "scrolling-only frame, no PROJECTION push" from
+	// "real 2D mode" and was clobbering m_view3DMtx with the prior 2D
+	// pass's identity.
+	const bool isUI2D = (m_phaseD13cSourceTag == IRenderBackend::kSrcUI2D);
+	if (isUI2D) {
 		std::memcpy(m_view2DMtx, m, sizeof(m_view2DMtx));
 		m_view2DDirty = true;
 	} else {
@@ -681,8 +689,16 @@ void BgfxBackend::Set_Projection_Transform(const float m[16])
 	// WORLD → VIEW → PROJECTION and Render2DClass also pushes VIEW
 	// before PROJECTION — the latch is current by the time
 	// ApplyDrawState consumes it.
-	const bool prevActive2D = m_active2D;
-	m_active2D = (fabsf(m[15] - 1.0f) < 1e-4f);
+	// Phase F — m_active2D is now derived from the source tag, not the
+	// proj[15]==1 heuristic. Render2DClass::Render tags itself as kSrcUI2D
+	// for both the identity view+proj setup and the post-draw restore, so
+	// the dx8wrapper restored 3D camera+persp arriving on the next 3D
+	// mesh's Apply lands cleanly in the 3D slot even if no
+	// PROJECTION_CHANGED fires that frame. Keep m_active2D as a public
+	// observable for legacy ApplyDrawState routing, but anchor it to the
+	// tag now.
+	const bool isUI2D = (m_phaseD13cSourceTag == IRenderBackend::kSrcUI2D);
+	m_active2D = isUI2D;
 
 	// Phase D17 — particle draws share the camera's perspective projection;
 	// store it on the kView3DPart slot too. PointGroupClass::Render doesn't
@@ -694,22 +710,12 @@ void BgfxBackend::Set_Projection_Transform(const float m[16])
 		return;
 	}
 
-	if (m_active2D) {
+	if (isUI2D) {
 		std::memcpy(m_proj2DMtx, m, sizeof(m_proj2DMtx));
 		m_view2DDirty = true;
-		// Mode flipped this Apply pass: the VIEW that arrived just
-		// before this PROJECTION landed in m_view3DMtx (because
-		// m_active2D was still false). Pull it into the 2D slot so
-		// the upcoming submit uses paired view+proj.
-		if (!prevActive2D) {
-			std::memcpy(m_view2DMtx, m_view3DMtx, sizeof(m_view2DMtx));
-		}
 	} else {
 		std::memcpy(m_proj3DMtx, m, sizeof(m_proj3DMtx));
 		m_view3DDirty = true;
-		if (prevActive2D) {
-			std::memcpy(m_view3DMtx, m_view2DMtx, sizeof(m_view3DMtx));
-		}
 		// Mirror the latest 3D camera projection into the particle slot so
 		// kView3DPart projects the same as kView3D when particles arrive.
 		std::memcpy(m_proj3DPartMtx, m, sizeof(m_proj3DPartMtx));

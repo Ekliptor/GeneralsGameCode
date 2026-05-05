@@ -105,6 +105,12 @@ public:
 		kSrcRoads      = 5,
 		kSrcBibs       = 6,
 		kSrcExtraBlend = 7,
+		// Phase F — `Render2DClass::Render` tags itself so the BGFX backend
+		// routes its identity view + ortho projection into the 2D slot
+		// without piggybacking on the proj[15]==1 heuristic, which mis-routes
+		// the 3D camera matrix when scrolling-only frames push VIEW without
+		// PROJECTION.
+		kSrcUI2D       = 8,
 	};
 	virtual void Set_Source_Tag(unsigned /*tag*/) {}
 

@@ -379,8 +379,13 @@ DirectSubmitStatus Render_Mesh_Direct_Bgfx(MeshClass& mesh, RenderInfoClass& rin
 	const VertexLayoutDesc layout = BuildLayout();
 	const int passCount = model->Get_Pass_Count();
 	const bool needsMultiPass = (passCount > 1);
+	// Phase D15 — `Has_Shader_Array(0)` means Shader[0] is zero-init while the
+	// real shader bits live in ShaderArray[0]; if we let the fast path's
+	// `Get_Single_Shader(0)` see that zero, BuildStateMask emits no color/Z
+	// write and the mesh renders invisibly.
 	const bool needsArray =
-		model->Has_Texture_Array(0, 0) || model->Has_Texture_Array(0, 1);
+		model->Has_Texture_Array(0, 0) || model->Has_Texture_Array(0, 1)
+		|| model->Has_Shader_Array(0);
 
 	// Phase D12 fast path — bit-for-bit D10 behaviour for the common
 	// single-pass / single-texture case. The 85+ inventory meshes that
@@ -433,10 +438,11 @@ DirectSubmitStatus Render_Mesh_Direct_Bgfx(MeshClass& mesh, RenderInfoClass& rin
 		if (!already && seenSlowCount < 64) {
 			seenSlow[seenSlowCount++] = mname;
 			std::fprintf(stderr,
-				"[PhaseD12:slowpath] name=%s passes=%d arr00=%d arr01=%d\n",
+				"[PhaseD12:slowpath] name=%s passes=%d arr00=%d arr01=%d shArr0=%d\n",
 				mname, passCount,
 				model->Has_Texture_Array(0, 0) ? 1 : 0,
-				model->Has_Texture_Array(0, 1) ? 1 : 0);
+				model->Has_Texture_Array(0, 1) ? 1 : 0,
+				model->Has_Shader_Array(0) ? 1 : 0);
 		}
 	}
 	// Vertex buffer is shared across passes (matdesc pattern is
@@ -450,12 +456,24 @@ DirectSubmitStatus Render_Mesh_Direct_Bgfx(MeshClass& mesh, RenderInfoClass& rin
 	{
 		if (VertexMaterialClass* vmat = model->Peek_Material(0, pass))
 			DX8Wrapper::Set_Material(vmat);
-		DX8Wrapper::Set_Shader(model->Get_Single_Shader(pass));
+
+		// Phase D15 — when the matdesc stores per-polygon shaders in
+		// ShaderArray[pass], `Get_Single_Shader(pass)` returns the zero-init
+		// Shader[pass] field (all-zero ShaderBits → BuildStateMask drops
+		// color/depth writes → invisible mesh). `Get_Shader(0, pass)` falls
+		// back to ShaderArray[pass]->Get_Element(0), which is the actual
+		// per-polygon shader. ABBTCMDHQ.BUILDING / .CROWS NEST and
+		// ZBSUPPLYDK.BOX01 hit this path.
+		const bool arrayShader = model->Has_Shader_Array(pass);
+		ShaderClass passShader = arrayShader
+			? model->Get_Shader(0, pass)
+			: model->Get_Single_Shader(pass);
+		DX8Wrapper::Set_Shader(passShader);
 
 		const bool arrayTex0 = model->Has_Texture_Array(pass, 0);
 		const bool arrayTex1 = model->Has_Texture_Array(pass, 1);
 
-		if (!arrayTex0 && !arrayTex1)
+		if (!arrayTex0 && !arrayTex1 && !arrayShader)
 		{
 			// Multi-pass with single textures per stage: one draw per pass.
 			if (TextureClass* tex0 = model->Peek_Single_Texture(pass, 0))
@@ -478,17 +496,22 @@ DirectSubmitStatus Render_Mesh_Direct_Bgfx(MeshClass& mesh, RenderInfoClass& rin
 		}
 		else
 		{
-			// Per-polygon texture-array path: scan triangles, batch
-			// contiguous runs of equal (tex0, tex1) into single draws.
-			// `Peek_Texture(pidx, pass, stage)` already handles the
-			// array-vs-single fallback (meshmatdesc.cpp:542).
+			// Per-polygon texture/shader-array path: scan triangles, batch
+			// contiguous runs of equal (tex0, tex1, shader) into single draws.
+			// `Peek_Texture(pidx, pass, stage)` and `Get_Shader(pidx, pass)`
+			// each handle the array-vs-single fallback themselves.
 			int runStart = 0;
 			TextureClass* runTex0 = model->Peek_Texture(0, pass, 0);
 			TextureClass* runTex1 = arrayTex1
 				? model->Peek_Texture(0, pass, 1)
 				: model->Peek_Single_Texture(pass, 1);
+			ShaderClass runShader = passShader;
 
 			auto submitRun = [&](int endTri) {
+				// Re-issue per run; Set_Shader is a no-op when the bits
+				// match the cached value, so this is cheap when the run
+				// shader didn't actually change.
+				DX8Wrapper::Set_Shader(runShader);
 				if (runTex0)
 					DX8Wrapper::Set_Texture(0, runTex0);
 				else
@@ -516,11 +539,16 @@ DirectSubmitStatus Render_Mesh_Direct_Bgfx(MeshClass& mesh, RenderInfoClass& rin
 				TextureClass* t1 = arrayTex1
 					? model->Peek_Texture(i, pass, 1)
 					: runTex1;
-				if (t0 != runTex0 || t1 != runTex1) {
+				const bool shaderChanged = arrayShader
+					&& (model->Get_Shader(i, pass).Get_Bits()
+					    != runShader.Get_Bits());
+				if (t0 != runTex0 || t1 != runTex1 || shaderChanged) {
 					submitRun(i);
 					runStart = i;
 					runTex0 = t0;
 					runTex1 = t1;
+					if (shaderChanged)
+						runShader = model->Get_Shader(i, pass);
 				}
 			}
 			submitRun(triCount);

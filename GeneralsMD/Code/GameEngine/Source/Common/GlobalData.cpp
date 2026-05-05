@@ -1020,6 +1020,8 @@ GlobalData::GlobalData()
 	m_screenshotCountdownFrames = 0;
 	m_autoSkirmish = FALSE;
 	m_autoSkirmishMap.clear();
+	m_autoSkirmishFaction.clear();
+	m_screenshotScrollFirst = FALSE;
 	m_allowExitOutOfMovies = FALSE;
 	m_loadScreenRender = FALSE;
 

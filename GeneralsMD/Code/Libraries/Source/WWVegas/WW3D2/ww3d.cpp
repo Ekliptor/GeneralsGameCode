@@ -2363,8 +2363,20 @@ WW3DErrorType WW3D::Set_Render_Device(int dev, int width, int height, int bits, 
 		? WW3D_ERROR_OK
 		: WW3D_ERROR_INITIALIZATION_FAILED;
 }
-void WW3D::Get_Device_Resolution(int& w, int& h, int& bits, bool& windowed) { w = h = bits = 0; windowed = true; }
-void WW3D::Get_Render_Target_Resolution(int& w, int& h, int& bits, bool& windowed) { w = h = bits = 0; windowed = true; }
+// Phase F — these stubs used to hardcode `w = h = 0`, producing
+// `device_coord / 0 = inf` inside `CameraClass::Device_To_View_Space`
+// (called from `W3DView::scrollBy`). The infinity propagated through the
+// scroll math, ended up in `setPosition(NaN)`, and froze the in-game 3D
+// scene at black on the first scroll. Forward to the DX8Wrapper
+// accessors that actually carry the bgfx swap-chain dims.
+void WW3D::Get_Device_Resolution(int& w, int& h, int& bits, bool& windowed)
+{
+	DX8Wrapper::Get_Device_Resolution(w, h, bits, windowed);
+}
+void WW3D::Get_Render_Target_Resolution(int& w, int& h, int& bits, bool& windowed)
+{
+	DX8Wrapper::Get_Render_Target_Resolution(w, h, bits, windowed);
+}
 const RenderDeviceDescClass& WW3D::Get_Render_Device_Desc(int) { static RenderDeviceDescClass d; return d; }
 int  WW3D::Get_Texture_Bitdepth() { return 32; }
 void WW3D::Set_Texture_Bitdepth(int) {}

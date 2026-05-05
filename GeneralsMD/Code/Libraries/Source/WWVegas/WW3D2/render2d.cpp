@@ -39,6 +39,10 @@
  * - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
 #include "always.h"
+#ifndef RTS_RENDERER_DX8
+#include "RenderBackendRuntime.h"
+#include "IRenderBackend.h"
+#endif
 
 // Phase 5h.2D — Render2DClass compiles in both DX8 and bgfx builds.
 // The class's body uses DX8Wrapper abstractions that already have bgfx
@@ -652,6 +656,22 @@ void Render2DClass::Render()
 	DX8Wrapper::Set_View_Identity();
 	DX8Wrapper::Set_Transform(D3DTS_PROJECTION,identity);
 
+	// Phase F — tag this submit as 2D-UI so the BGFX backend routes our
+	// identity view + ortho projection into the 2D slot regardless of the
+	// proj[15]==1 heuristic. Without this, after a 2D draw latches
+	// `m_active2D=true`, scrolling-only frames push only VIEW (not
+	// PROJECTION — projection is unchanged). The 3D camera matrix lands in
+	// the 2D slot and `m_view3DMtx` keeps the identity we wrote here, so
+	// kView3D submits render with identity → 3D scene goes black after the
+	// first scroll.
+#ifndef RTS_RENDERER_DX8
+	unsigned savedSourceTag = IRenderBackend::kSrcUnknown;
+	if (IRenderBackend* b = RenderBackendRuntime::Get_Active()) {
+		savedSourceTag = b->Get_Source_Tag();
+		b->Set_Source_Tag(IRenderBackend::kSrcUI2D);
+	}
+#endif
+
 	DynamicVBAccessClass vb(BUFFER_TYPE_DYNAMIC_DX8,dynamic_fvf_type,Vertices.Count());
 	{
 		DynamicVBAccessClass::WriteLockClass Lock(&vb);
@@ -716,6 +736,11 @@ void Render2DClass::Render()
 	if (IsGrayScale)
 		ShaderClass::Invalidate();	//force both stages to be reset.
 
+#ifndef RTS_RENDERER_DX8
+	if (IRenderBackend* b = RenderBackendRuntime::Get_Active()) {
+		b->Set_Source_Tag(savedSourceTag);
+	}
+#endif
 }
 
 

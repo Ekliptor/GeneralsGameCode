@@ -1076,6 +1076,81 @@ Outside mesh-render scope. Distinct effort; track via
 Without these the ZH menu remains unusable as a gameplay entry
 point even with all mesh issues resolved.
 
+### Phase F — In-game tactical view: 3D black after scroll  *(landed 2026-05-05)*
+
+First in-game session past the menu. User reported: HQ visible briefly at game
+start, then 3D scene goes black after the first RMB scroll; bottom HUD frame
+mostly missing; build icons in bottom-right flicker. Two independent BGFX-only
+bugs were stacked into the same symptom.
+
+**Fix 1 — `Render2DClass` source-tag routing.**
+`BgfxBackend::Set_View_Transform` / `Set_Projection_Transform` chose between
+`m_view2DMtx` and `m_view3DMtx` via `m_active2D`, set by the `proj[15]==1`
+heuristic on each PROJECTION push. After a 2D HUD frame latched
+`m_active2D=true`, the next 3D mesh draw whose camera-only update fired
+`VIEW_CHANGED` without `PROJECTION_CHANGED` (e.g. scrolling without zoom)
+landed the new camera in the 2D slot, while `m_view3DMtx` kept the prior
+identity that `Render2DClass::Render`'s `Set_View_Identity` had written.
+kView3D submits then rendered with identity → 3D scene black.
+
+- `Core/Libraries/Source/WWVegas/WW3D2/IRenderBackend.h` adds
+  `kSrcUI2D = 8` to the `DrawSourceTag` enum.
+- Both `Render2DClass::Render` copies (`Generals/.../render2d.cpp:611`,
+  `GeneralsMD/.../render2d.cpp:611`) now `Set_Source_Tag(kSrcUI2D)` before
+  the identity-view setup and restore the previous tag after
+  `DX8Wrapper::Draw_Triangles`.
+- `BgfxBackend::Set_View_Transform` / `Set_Projection_Transform` route by
+  `(m_phaseD13cSourceTag == kSrcUI2D)` instead of `m_active2D`. The
+  `m_active2D` flag is now derived from the tag for legacy
+  `ApplyDrawState` callers that still consult it.
+
+**Fix 2 — `WW3D::Get_Render_Target_Resolution` BGFX stub.**
+`GeneralsMD/.../ww3d.cpp:2367` had:
+```cpp
+void WW3D::Get_Render_Target_Resolution(int& w, int& h, int& bits, bool& windowed) { w = h = bits = 0; windowed = true; }
+```
+returning zero dimensions. `CameraClass::Device_To_View_Space` (`camera.cpp:660`)
+then divides the device coord by these → `inf`, ViewPlane subtraction →
+`NaN`, propagating into `W3DView::scrollBy`'s `setPosition(NaN, NaN)`. From
+that point the 3D camera is permanently NaN; kView3D submits cull every
+mesh; minimap clicks (also routed through `Device_To_View_Space` via
+`pixelToWorldRay`) silently no-op. Vanilla `Generals/.../ww3d.cpp` already
+forwarded to `DX8Wrapper::Get_Render_Target_Resolution`; ZH was the only
+affected target.
+
+Forward both `Get_Device_Resolution` and `Get_Render_Target_Resolution` to
+the `DX8Wrapper` accessors that carry the bgfx swap-chain dims (1600×1200
+on the test machine).
+
+**Tooling — `-skirmishScreenshot <path> [<map>]`** (`CommandLine.cpp`).
+Combines the existing `-skirmish` and `-screenshot` flags with a longer
+1500-frame countdown and a one-shot scripted scroll 60 frames before
+capture. Used for repeatable in-game capture without the menu UI.
+
+**Verification.**
+
+| Pass | f=510 → f=1530 | scroll trigger | screenshot |
+|------|----------------|----------------|------------|
+| pre-fix (routing only)  | v3D.tr=(-1063, …) | scroll → `m_view3DMtx=identity` | 3D black |
+| post-fix1 (routing tag) | v3D.tr stable | scroll → `Device_To_View_Space` returns NaN | 3D black (separate bug) |
+| post-fix2 (both)        | v3D.tr stable | scroll → v3D.tr=(-1063.49,…) | 3D scene rendered |
+
+`~/Desktop/zh-ingame-fixed.png` (post-fix1) shows partial HUD over black 3D.
+`/tmp/zh-final-clean.png` (post-fix2) shows the full tactical view: HQ
+buildings, terrain, mini-map with terrain detail, build icons stable,
+money display, generals tab.
+
+**Out of scope (still observed).**
+
+- macOS HiDPI mouse coords for click hit-tests on the minimap and gadgets
+  remain a separate concern (memory `sdl3_mouse_coords_macos`); fix #2
+  resolves the camera-NaN side of "minimap clicks don't work" but
+  point→pixel scaling is a parallel issue that may persist for some
+  widgets.
+
+Memories: `ww3d_get_render_target_resolution_stub.md`,
+`render2d_source_tag_routing.md`.
+
 ## Verification commands
 
 ```bash
