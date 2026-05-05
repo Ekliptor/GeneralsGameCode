@@ -142,10 +142,13 @@ int main(int argc, char *argv[])
 			// true physical pixel count and bgfx fills the entire surface.
 			flags |= SDL_WINDOW_HIGH_PIXEL_DENSITY;
 
+			// Apply the "-scale N" multiplier in windowed mode only; fullscreen sizes the
+			// surface to the display, so the multiplier would have no meaningful effect.
+			const Int windowScale = windowed ? TheGlobalData->m_windowScale : 1;
 			SDLDevice::TheSDLWindow = SDL_CreateWindow(
 				"Command and Conquer Generals Zero Hour",
-				DEFAULT_DISPLAY_WIDTH,
-				DEFAULT_DISPLAY_HEIGHT,
+				DEFAULT_DISPLAY_WIDTH  * windowScale,
+				DEFAULT_DISPLAY_HEIGHT * windowScale,
 				flags);
 
 			if (!SDLDevice::TheSDLWindow)

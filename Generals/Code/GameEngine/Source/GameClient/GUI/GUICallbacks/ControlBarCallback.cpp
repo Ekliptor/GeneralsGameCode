@@ -258,9 +258,26 @@ WindowMsgHandledType LeftHUDInput( GameWindow *window, UnsignedInt msg,
 
 				const DrawableList *drawableList = TheInGameUI->getAllSelectedLocalDrawables(); // locally-owned only
 
+				// Scroll the camera unless at least one of the selected units is
+				// actually mobile. Skirmish auto-selects the player's Command
+				// Center (GameLogic::findAndSelectCommandCenter), and a CC is
+				// KINDOF_IMMOBILE — sending it MSG_DO_MOVETO does nothing
+				// visible, so a plain LMB on the minimap silently fails until
+				// the user manually deselects. Treat an all-immobile selection
+				// the same as no selection for minimap dispatch.
+				Bool hasMobileSelection = FALSE;
+				for (DrawableListCIt it = drawableList->begin(); it != drawableList->end(); ++it)
+				{
+					const Object *o = (*it) ? (*it)->getObject() : nullptr;
+					if (o && !o->isKindOf(KINDOF_IMMOBILE))
+					{
+						hasMobileSelection = TRUE;
+						break;
+					}
+				}
 
  				// see if the user wants to move the tactical view
- 				if (	drawableList->empty()
+ 				if (	!hasMobileSelection
  					||	(! TheGlobalData->m_useAlternateMouse && msg == GWM_RIGHT_DOWN)
  					||	(TheGlobalData->m_useAlternateMouse && msg == GWM_LEFT_DOWN)	)
 				{

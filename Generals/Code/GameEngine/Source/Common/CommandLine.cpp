@@ -520,6 +520,21 @@ Int parseYRes(char *args[], int num)
 	return 1;
 }
 
+// TheSuperHackers @feature "-scale N" — integer multiplier (1..4) applied to the windowed-mode
+// SDL window dimensions and to the default render resolution. Ignored in fullscreen mode.
+Int parseScale(char *args[], int num)
+{
+	if (num > 1)
+	{
+		Int s = atoi(args[1]);
+		if (s < 1) s = 1;
+		if (s > 4) s = 4;
+		TheWritableGlobalData->m_windowScale = s;
+		return 2;
+	}
+	return 1;
+}
+
 #if defined(RTS_DEBUG)
 //=============================================================================
 //=============================================================================
@@ -1194,6 +1209,10 @@ static CommandLineParam paramsForStartup[] =
 	{ "-win", parseWin },
 	{ "-fullscreen", parseNoWin },
 
+	// TheSuperHackers @feature "-scale N" — integer multiplier (1..4) applied to the windowed-mode
+	// SDL window dimensions and to the default render resolution. Ignored in fullscreen mode.
+	{ "-scale", parseScale },
+
 	// TheSuperHackers @feature helmutbuhler 11/04/2025
 	// This runs the game without a window, graphics, input and audio. You can combine this with -replay
 	{ "-headless", parseHeadless },
@@ -1519,4 +1538,14 @@ void CommandLine::parseCommandLineForEngineInit()
 	TheWritableGlobalData->m_commandLineData.m_hasParsedCommandLineForEngineInit = true;
 
 	parseCommandLine(paramsForEngineInit, ARRAY_SIZE(paramsForEngineInit));
+}
+
+void CommandLine::applyWindowScaleToResolution()
+{
+	const Int s = TheGlobalData ? TheGlobalData->m_windowScale : 1;
+	if (s > 1)
+	{
+		TheWritableGlobalData->m_xResolution = DEFAULT_DISPLAY_WIDTH * s;
+		TheWritableGlobalData->m_yResolution = DEFAULT_DISPLAY_HEIGHT * s;
+	}
 }

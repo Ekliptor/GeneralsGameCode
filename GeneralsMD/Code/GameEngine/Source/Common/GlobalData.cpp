@@ -642,6 +642,7 @@ GlobalData::GlobalData()
 	m_chipSetType = 0;
 	m_headless = FALSE;
 	m_windowed = 0;
+	m_windowScale = 1;
 	m_xResolution = DEFAULT_DISPLAY_WIDTH;
 	m_yResolution = DEFAULT_DISPLAY_HEIGHT;
 	m_maxShellScreens = 0;

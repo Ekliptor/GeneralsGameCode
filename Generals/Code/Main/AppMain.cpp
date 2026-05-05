@@ -149,10 +149,13 @@ int main(int argc, char *argv[])
 			// surface.
 			flags |= SDL_WINDOW_HIGH_PIXEL_DENSITY;
 
+			// Apply the "-scale N" multiplier in windowed mode only; fullscreen sizes the
+			// surface to the display, so the multiplier would have no meaningful effect.
+			const Int windowScale = windowed ? TheGlobalData->m_windowScale : 1;
 			SDLDevice::TheSDLWindow = SDL_CreateWindow(
 				"Command and Conquer Generals",
-				APP_MAIN_DEFAULT_WIDTH,
-				APP_MAIN_DEFAULT_HEIGHT,
+				APP_MAIN_DEFAULT_WIDTH  * windowScale,
+				APP_MAIN_DEFAULT_HEIGHT * windowScale,
 				flags);
 
 			if (!SDLDevice::TheSDLWindow)

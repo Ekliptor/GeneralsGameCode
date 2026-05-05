@@ -121,6 +121,7 @@ public:
 	Bool m_headless;
 
 	Bool m_windowed;
+	Int m_windowScale;	///< Integer multiplier for the windowed-mode SDL window (1..4). Set via "-scale N" startup flag.
 	Int m_xResolution;
 	Int m_yResolution;
 	Int m_maxShellScreens;  ///< this many shells layouts can be loaded at once
