@@ -3060,6 +3060,44 @@ ParticleSystem *ParticleSystemManager::createParticleSystem( const ParticleSyste
 	if (sysTemplate == nullptr)
 		return nullptr;
 
+	// Defensive cap on the live-system list to keep the per-frame
+	// `update()` walk bounded. Without this, scenarios that spawn
+	// unit-attached forever-emit FX systems faster than the owning units
+	// retire (e.g. the shellmap on the BGFX build, where GameLogic now
+	// runs continuously and units cycle indefinitely) accrete systems at
+	// ~35/s. The list is iterated once per frame, so growth quickly
+	// turns into O(N) per-frame work that starves the main loop and
+	// blacks out the 3D viewport. When over the soft cap, prune the
+	// oldest forever-emit systems by calling destroy() — they finish out
+	// their existing particles and self-delete on the next ::update.
+	{
+		constexpr UnsignedInt kSoftCap = 1500;
+		constexpr UnsignedInt kPruneBatch = 50;
+		if (m_particleSystemCount >= kSoftCap)
+		{
+			UnsignedInt pruned = 0;
+			for (ParticleSystemListIt it = m_allParticleSystemList.begin();
+				 it != m_allParticleSystemList.end() && pruned < kPruneBatch;
+				 ++it)
+			{
+				ParticleSystem* s = *it;
+				if (s && !s->isDestroyed() && s->isSystemForever())
+				{
+					s->destroy();
+					++pruned;
+				}
+			}
+			static UnsignedInt s_warnTick = 0;
+			if ((s_warnTick++ % 60) == 0)
+			{
+				std::fprintf(stderr,
+					"[ParticleSystemManager] cap %u reached, destroyed %u "
+					"oldest forever systems (live=%u)\n",
+					kSoftCap, (unsigned)pruned, (unsigned)m_particleSystemCount);
+			}
+		}
+	}
+
 	m_uniqueSystemID = (ParticleSystemID)((UnsignedInt)m_uniqueSystemID + 1);
 	ParticleSystem *sys = newInstance(ParticleSystem)( sysTemplate, m_uniqueSystemID, createSlaves );
 	return sys;
