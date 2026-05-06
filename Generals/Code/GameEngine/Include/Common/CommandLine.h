@@ -34,4 +34,9 @@ public:
 
 	static void parseCommandLineForStartup();
 	static void parseCommandLineForEngineInit();
+
+	// TheSuperHackers @feature Apply the window scale factor (set by the "-scale N" startup flag)
+	// to TheWritableGlobalData->m_xResolution and m_yResolution. Called after INI loading and
+	// before parseCommandLineForEngineInit() so that "-xres"/"-yres" still take precedence.
+	static void applyWindowScaleToResolution();
 };

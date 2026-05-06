@@ -242,6 +242,12 @@ private:
 	bool m_view2DDirty     = true;
 	bool m_view3DPartDirty = true;
 	bool m_active2D    = false;        // latched by Set_Projection_Transform
+	// Phase G2 — set by Set_View_Transform when the latest non-UI view write was
+	// identity. Routes the corresponding draw to kView3DPart instead of kView3D
+	// so callers that pre-transform vertices to view-space (LineGroup,
+	// SegLineRenderer, StreakRender, W3DSnow, W3DSmudge, Dazzle) don't poison
+	// kView3D's camera matrix and black out the entire 3D viewport.
+	bool m_lastNonUIViewIsIdentity = false;
 	uint16_t m_pendingSubmitView = 0;  // set by ApplyDrawState; read by submit sites
 
 	// Phase D5 — set/cleared by W3DShaderManager around terrain draws.

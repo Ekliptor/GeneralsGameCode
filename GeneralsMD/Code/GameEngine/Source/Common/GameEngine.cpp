@@ -481,6 +481,8 @@ void GameEngine::init()
 	#endif
 
 		// special-case: parse command-line parameters after loading global data
+		// Apply "-scale N" before the engine-init CLI so "-xres"/"-yres" still take precedence.
+		CommandLine::applyWindowScaleToResolution();
 		CommandLine::parseCommandLineForEngineInit();
 
 		TheArchiveFileSystem->loadMods();

@@ -665,6 +665,27 @@ void BgfxBackend::Set_View_Transform(const float m[16])
 		m_view3DPartDirty = true;
 		return;
 	}
+	// Phase G2 — generalize the kView3DPart route to ANY identity-view 3D draw.
+	// LineGroup, SegLineRenderer, StreakRender, W3DSnow, W3DSmudge, Dazzle all
+	// pre-transform their vertices to view space and push VIEW=identity without
+	// tagging as kSrcParticle. Without this guard the identity matrix lands in
+	// kView3D's slot and clobbers the camera matrix at frame() time — the entire
+	// 3D viewport renders black for the rest of the frame whenever any of these
+	// effects are active (e.g., the selection bracket on a building or rally
+	// point line). Set m_lastNonUIViewIsIdentity so ApplyDrawState routes the
+	// corresponding draw to kView3DPart and the line/sprite vertices land in
+	// the right slot.
+	const bool isIdentity = (m[0]==1.0f && m[1]==0.0f && m[2]==0.0f && m[3]==0.0f
+	                      && m[4]==0.0f && m[5]==1.0f && m[6]==0.0f && m[7]==0.0f
+	                      && m[8]==0.0f && m[9]==0.0f && m[10]==1.0f && m[11]==0.0f
+	                      && m[12]==0.0f && m[13]==0.0f && m[14]==0.0f && m[15]==1.0f);
+	if (isIdentity && !m_active2D && m_phaseD13cSourceTag != IRenderBackend::kSrcUI2D) {
+		std::memcpy(m_view3DPartMtx, m, sizeof(m_view3DPartMtx));
+		m_view3DPartDirty = true;
+		m_lastNonUIViewIsIdentity = true;
+		return;
+	}
+	m_lastNonUIViewIsIdentity = false;
 	// Phase F — when Render2DClass tagged this submit as 2D-UI, route into
 	// the 2D slot regardless of m_active2D. When the caller is anything
 	// else (3D mesh, terrain, particle in 2D-active mode), route into the
@@ -1384,12 +1405,16 @@ bgfx::ProgramHandle BgfxBackend::ApplyDrawState(uint32_t attrMask)
 			m_view2DDirty = false;
 		}
 	}
-	else if (m_phaseD13cSourceTag == IRenderBackend::kSrcParticle)
+	else if (m_phaseD13cSourceTag == IRenderBackend::kSrcParticle || m_lastNonUIViewIsIdentity)
 	{
 		// Phase D17 — PointGroupClass particles. Pre-transformed-to-view-space
 		// vertices need IDENTITY view here; routing them through the
 		// dedicated kView3DPart prevents that identity matrix from
 		// retroactively erasing kView3D's camera at frame() time.
+		// Phase G2 — also route here whenever the latest non-UI view write was
+		// identity. Catches LineGroup, SegLineRenderer, StreakRender, W3DSnow,
+		// W3DSmudge, Dazzle and any future caller that pre-transforms to view
+		// space without tagging as kSrcParticle.
 		targetView = kView3DPart;
 		if (m_view3DPartDirty) {
 			bgfx::setViewTransform(targetView, m_view3DPartMtx, m_proj3DPartMtx);
