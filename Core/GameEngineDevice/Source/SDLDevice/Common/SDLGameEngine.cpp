@@ -28,6 +28,7 @@
 #include <SDL3/SDL.h>
 
 #include <cmath>
+#include <cstdio>
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -58,6 +59,14 @@ namespace
 	float s_mouseScaleX = 1.0f;
 	float s_mouseScaleY = 1.0f;
 	bool  s_mouseScaleSeeded = false;
+
+	// Bitmask of mouse buttons we believe are currently down (we forwarded a
+	// DOWN to TheWin32Mouse but no matching UP yet). Used to detect SDL3
+	// dropping a BUTTON_UP across a focus boundary (Mission Control, hot
+	// corners, Cmd-Tab, dock-show) — without reconciliation, Mouse::process
+	// MouseEvent stays wedged in MBS_Down and the next single-click is eaten
+	// by the edge-triggered state machine.
+	Uint32 s_heldButtons = 0;
 
 	void refreshMouseScale()
 	{
@@ -162,6 +171,15 @@ namespace
 void SDLGameEngine::serviceWindowsOS()
 {
 	if (!s_mouseScaleSeeded) refreshMouseScale();
+
+	// SDL3 does not coalesce SDL_EVENT_MOUSE_MOTION; high-Hz mice/trackpads can
+	// emit hundreds per second. Forwarding each one would flood Win32Mouse's
+	// 256-slot ring buffer during frame stalls and silently drop button DOWN/UP
+	// events queued behind them — wedging Mouse::processMouseEvent's edge-
+	// triggered click state machine in MBS_Down. Keep only the latest motion.
+	SDL_Event lastMotion;
+	bool haveMotion = false;
+
 	SDL_Event e;
 	while (SDL_PollEvent(&e))
 	{
@@ -200,6 +218,10 @@ void SDLGameEngine::serviceWindowsOS()
 				break;
 
 			case SDL_EVENT_MOUSE_MOTION:
+				lastMotion = e;
+				haveMotion = true;
+				break;
+
 			case SDL_EVENT_MOUSE_BUTTON_DOWN:
 			case SDL_EVENT_MOUSE_BUTTON_UP:
 			case SDL_EVENT_MOUSE_WHEEL:
@@ -210,12 +232,61 @@ void SDLGameEngine::serviceWindowsOS()
 				WPARAM wParam = 0;
 				LPARAM lParam = 0;
 				if (translateMouseEvent(e, msg, wParam, lParam))
+				{
+					if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN)
+						s_heldButtons |= SDL_BUTTON_MASK(e.button.button);
+					else if (e.type == SDL_EVENT_MOUSE_BUTTON_UP)
+						s_heldButtons &= ~SDL_BUTTON_MASK(e.button.button);
 					TheWin32Mouse->addWin32Event(msg, wParam, lParam, e.common.timestamp / 1000000u);
+				}
 				break;
 			}
 
 			default:
 				break;
+		}
+	}
+
+	if (haveMotion && TheWin32Mouse)
+	{
+		UINT msg = 0;
+		WPARAM wParam = 0;
+		LPARAM lParam = 0;
+		if (translateMouseEvent(lastMotion, msg, wParam, lParam))
+			TheWin32Mouse->addWin32Event(msg, wParam, lParam, lastMotion.common.timestamp / 1000000u);
+	}
+
+	// Reconcile held-button state with SDL's current view. If we tracked a
+	// DOWN but SDL says the button is no longer held (UP was dropped across a
+	// focus boundary — Mission Control, Cmd-Tab, dock-show, hot corner),
+	// synthesize the missing UP so Mouse::processMouseEvent can resync from
+	// MBS_Down to MBS_Up. Without this, the next single-click is silently
+	// swallowed by the edge-triggered state machine.
+	if (s_heldButtons && TheWin32Mouse)
+	{
+		float mx = 0.0f, my = 0.0f;
+		const Uint32 sdlMask = SDL_GetMouseState(&mx, &my);
+		const Uint32 stale = s_heldButtons & ~sdlMask;
+		if (stale)
+		{
+			const LPARAM pos = packMousePos(scaleX(mx), scaleY(my));
+			const DWORD ts = static_cast<DWORD>(SDL_GetTicks());
+			const struct { Uint32 mask; UINT msg; } table[] = {
+				{ SDL_BUTTON_MASK(SDL_BUTTON_LEFT),   WM_LBUTTONUP },
+				{ SDL_BUTTON_MASK(SDL_BUTTON_MIDDLE), WM_MBUTTONUP },
+				{ SDL_BUTTON_MASK(SDL_BUTTON_RIGHT),  WM_RBUTTONUP },
+			};
+			for (const auto &row : table)
+			{
+				if (stale & row.mask)
+				{
+					std::fprintf(stderr,
+						"[InputFix:syncUP] synthesizing UP for mask=0x%X (SDL dropped it across focus boundary)\n",
+						row.mask);
+					TheWin32Mouse->addWin32Event(row.msg, 0, pos, ts);
+					s_heldButtons &= ~row.mask;
+				}
+			}
 		}
 	}
 }

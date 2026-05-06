@@ -32,6 +32,8 @@
 #include <windows.h>
 #endif
 
+#include <cstdio>
+
 #include "Common/Debug.h"
 #include "Common/GlobalData.h"
 #include "Common/LocalFileSystem.h"
@@ -319,26 +321,49 @@ void Win32Mouse::update()
 //-------------------------------------------------------------------------------------------------
 void Win32Mouse::addWin32Event( UINT msg, WPARAM wParam, LPARAM lParam, DWORD time )
 {
-
-	//
-	// we can only add this event if our next free index does not already
-	// have an event in it, if it does ... our buffer is full and this input
-	// event will be lost
-	//
 	if( m_eventBuffer[ m_nextFreeIndex ].msg != 0 )
-		return;
+	{
+		// Ring full. Motion events are disposable. Button DOWN/UP/double-click
+		// and wheel must NOT be dropped — Mouse::processMouseEvent is edge-
+		// triggered and a missing UP wedges leftState in MBS_Down indefinitely.
+		if( msg == WM_MOUSEMOVE )
+			return;
 
-	// add to this index
-	m_eventBuffer[ m_nextFreeIndex ].msg = msg;
+		// Reuse the oldest in-ring motion slot for this priority event. Place
+		// it in-band rather than at m_nextFreeIndex so we don't leave a hole —
+		// getMouseEvent stops at the first msg==0 slot.
+		UnsignedInt scan = m_nextGetIndex;
+		for( UnsignedInt n = 0; n < Mouse::NUM_MOUSE_EVENTS; ++n )
+		{
+			if( m_eventBuffer[ scan ].msg == WM_MOUSEMOVE )
+			{
+				m_eventBuffer[ scan ].msg    = msg;
+				m_eventBuffer[ scan ].wParam = wParam;
+				m_eventBuffer[ scan ].lParam = lParam;
+				m_eventBuffer[ scan ].time   = time;
+				std::fprintf(stderr, "[InputFix] ring full - evicted motion at idx=%u to keep msg=0x%X\n",
+				             scan, msg);
+				return;
+			}
+			scan = (scan + 1) % Mouse::NUM_MOUSE_EVENTS;
+		}
+
+		// Ring is full of non-motion events (extremely rare). Drop the oldest
+		// to keep the new button event.
+		std::fprintf(stderr, "[InputFix] ring full of non-motion - dropping oldest to keep msg=0x%X\n", msg);
+		m_eventBuffer[ m_nextGetIndex ].msg = 0;
+		m_nextGetIndex = (m_nextGetIndex + 1) % Mouse::NUM_MOUSE_EVENTS;
+		// Fall through.
+	}
+
+	m_eventBuffer[ m_nextFreeIndex ].msg    = msg;
 	m_eventBuffer[ m_nextFreeIndex ].wParam = wParam;
 	m_eventBuffer[ m_nextFreeIndex ].lParam = lParam;
-	m_eventBuffer[ m_nextFreeIndex ].time = time;
+	m_eventBuffer[ m_nextFreeIndex ].time   = time;
 
-	// wrap index at max
 	m_nextFreeIndex++;
 	if( m_nextFreeIndex >= Mouse::NUM_MOUSE_EVENTS )
 		m_nextFreeIndex = 0;
-
 }
 
 #ifdef _WIN32
