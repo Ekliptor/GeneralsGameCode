@@ -57,7 +57,7 @@ public:
 	virtual ~OpenALAudioManager() override;
 
 #if defined(RTS_DEBUG)
-	virtual void audioDebugDisplay(DebugDisplayInterface* dd, void* userData, FILE* fp = nullptr) override {}
+	virtual void audioDebugDisplay(DebugDisplayInterface* dd, void* userData, FILE* fp = nullptr) override;
 #endif
 
 	// SubsystemInterface
@@ -100,7 +100,7 @@ public:
 	virtual void setSpeakerType(UnsignedInt speakerType) override { m_speakerType = speakerType; }
 	virtual UnsignedInt getSpeakerType() override { return m_speakerType; }
 
-	virtual void notifyOfAudioCompletion(UnsignedInt audioCompleted, UnsignedInt flags) override {}
+	virtual void notifyOfAudioCompletion(UnsignedInt audioCompleted, UnsignedInt flags) override;
 
 	// Sample pool limits (surfaced to SoundManager for culling heuristics).
 	virtual UnsignedInt getNum2DSamples() const override { return 32; }
@@ -114,9 +114,9 @@ public:
 
 	virtual void adjustVolumeOfPlayingAudio(AsciiString eventName, Real newVolume) override;
 	virtual void removePlayingAudio(AsciiString eventName) override;
-	virtual void removeAllDisabledAudio() override {}
+	virtual void removeAllDisabledAudio() override;
 
-	virtual Bool has3DSensitiveStreamsPlaying() const override { return false; }
+	virtual Bool has3DSensitiveStreamsPlaying() const override;
 
 	// Video-audio interop. Returns OpenALAudioStream* usable by FFmpegVideoPlayer.
 	virtual void* getVideoAudioStreamHandle() override;
@@ -128,7 +128,7 @@ public:
 	virtual void setPreferredSpeaker(AsciiString speakerType) override { m_prefSpeaker = speakerType; }
 
 	virtual Real getFileLengthMS(AsciiString strToLoad) const override;
-	virtual void closeAnySamplesUsingFile(const void* fileToClose) override {}
+	virtual void closeAnySamplesUsingFile(const void* fileToClose) override;
 
 	// AudioManager overrides that need backend-aware behaviour
 	virtual void setVolume(Real volume, AudioAffect whichToAffect) override;

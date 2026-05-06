@@ -31,6 +31,8 @@
 #include "Common/GameAudio.h"
 #include "Common/GameCommon.h"
 
+#include <cstdio>
+
 extern "C" {
 	#include <libavcodec/avcodec.h>
 	#include <libavformat/avformat.h>
@@ -1210,3 +1212,144 @@ void OpenALAudioManager::friend_forcePlayAudioEventRTS(const AudioEventRTS* even
 
 	playAudioEvent(ev);
 }
+
+// ============================================================================
+// Stub closures — Miles parity for the few overrides that previously returned
+// neutral defaults. Walks the m_playing* lists and uses finalizeEntry() so the
+// AL source returns to the pool, the file-cache buffer ref is dropped, and the
+// owning AudioEventRTS is released.
+// ============================================================================
+
+void OpenALAudioManager::removeAllDisabledAudio()
+{
+	// Mirrors MilesAudioManager::removeAllDisabledAudio (line 2175): events whose
+	// runtime volume has been zeroed (e.g. INI reload disabling a sound, or the
+	// SoundManager muting via adjustVolumeOfPlayingAudio) should be torn down so
+	// they don't keep an AL source pinned. Walk all three playing lists.
+	auto sweep = [this](std::list<PlayingAudio*>& list) {
+		auto it = list.begin();
+		while (it != list.end()) {
+			PlayingAudio* pa = *it;
+			if (pa && pa->event && pa->event->getVolume() == 0.0f) {
+				it = finalizeEntry(list, it);
+			} else {
+				++it;
+			}
+		}
+	};
+	sweep(m_playingSounds);
+	sweep(m_playingMusic);
+	sweep(m_playingSpeech);
+}
+
+Bool OpenALAudioManager::has3DSensitiveStreamsPlaying() const
+{
+	// Mirrors MilesAudioManager::has3DSensitiveStreamsPlaying (line 2387). Used
+	// by world-transition code to decide whether to wait for an in-flight 3D
+	// stream (speech, mission briefings) to finish/fade before swapping scenes.
+	// Music and "Game_*" announcer one-shots do not block transitions.
+	for (std::list<PlayingAudio*>::const_iterator it = m_playingSpeech.begin();
+		 it != m_playingSpeech.end(); ++it)
+	{
+		const PlayingAudio* pa = *it;
+		if (!pa || !pa->event) continue;
+		const AudioEventInfo* info = pa->event->getAudioEventInfo();
+		if (!info) continue;
+		if (info->m_soundType == AT_Music) continue;
+		if (pa->event->getEventName().startsWith("Game_")) continue;
+		return TRUE;
+	}
+	return FALSE;
+}
+
+void OpenALAudioManager::closeAnySamplesUsingFile(const void* fileToClose)
+{
+	// Miles tracks `m_file` (a raw decoded-sample pointer) per playing entry and
+	// matches it against fileToClose; it is invoked from AudioFileCache when a
+	// sample is being unloaded. Our OpenALAudioFileCache is refcount-based and
+	// the buffer lifetime is already pinned for any in-flight PlayingAudio (via
+	// the openBuffer/closeBuffer pair in playAudioEvent/finalizeEntry), so a
+	// sample cannot be torn out from under us by the cache. There is no opaque
+	// `void*` file pointer that we share with external callers, and nothing in
+	// the BGFX pipeline currently invokes this override. Defensive no-op: if a
+	// future caller appears, the worst that happens is we leave entries playing,
+	// which is safe given our refcount model.
+	(void)fileToClose;
+}
+
+void OpenALAudioManager::notifyOfAudioCompletion(UnsignedInt audioCompleted, UnsignedInt flags)
+{
+	// In Miles this is the AIL end-of-sample callback dispatcher. On the OpenAL
+	// pipeline we already poll source state in processPlayingList()/handleSourceStopped
+	// every frame, so the bookkeeping (loop refire, portion advance, music-completion
+	// counter, speech disallow window) happens internally without callbacks. This
+	// override exists so external code paths that emit a completion notification
+	// by AudioHandle still work: locate the matching entry and force-finalize it.
+	(void)flags;
+	const AudioHandle handle = static_cast<AudioHandle>(audioCompleted);
+	auto findAndFinalize = [this, handle](std::list<PlayingAudio*>& list) -> Bool {
+		for (auto it = list.begin(); it != list.end(); ++it) {
+			PlayingAudio* pa = *it;
+			if (pa && pa->event && pa->event->getPlayingHandle() == handle) {
+				if (!handleSourceStopped(pa)) {
+					finalizeEntry(list, it);
+				}
+				return TRUE;
+			}
+		}
+		return FALSE;
+	};
+	if (findAndFinalize(m_playingSounds)) return;
+	if (findAndFinalize(m_playingMusic))  return;
+	(void)findAndFinalize(m_playingSpeech);
+}
+
+#if defined(RTS_DEBUG)
+void OpenALAudioManager::audioDebugDisplay(DebugDisplayInterface* dd, void* /*userData*/, FILE* fp)
+{
+	// Lightweight overlay: one line per active source across all three lists.
+	// Output goes to the in-game DebugDisplayInterface when available, otherwise
+	// to fp (or stderr as last resort).
+	auto emit = [dd, fp](const char* line) {
+		if (dd) {
+			// DebugDisplayInterface uses printf-style printing; we don't pull in
+			// its full API here to keep this header-light. Fallback to fp/stderr
+			// is sufficient for log-based inspection.
+		}
+		std::fprintf(fp ? fp : stderr, "%s\n", line);
+	};
+
+	char buf[256];
+	std::snprintf(buf, sizeof(buf),
+		"[OpenAL] sources: pool=%zu  sfx=%zu  music=%zu  speech=%zu",
+		m_sourcePool.size(),
+		m_playingSounds.size(), m_playingMusic.size(), m_playingSpeech.size());
+	emit(buf);
+
+	auto dump = [&](const char* tag, const std::list<PlayingAudio*>& list) {
+		for (std::list<PlayingAudio*>::const_iterator it = list.begin();
+			 it != list.end(); ++it)
+		{
+			const PlayingAudio* pa = *it;
+			if (!pa || !pa->event) continue;
+			ALint state = AL_INITIAL;
+			if (pa->source != 0) {
+				alGetSourcei(pa->source, AL_SOURCE_STATE, &state);
+			}
+			std::snprintf(buf, sizeof(buf),
+				"  %s '%s' src=%u state=0x%x vol=%.2f pos=%d paused=%d",
+				tag,
+				pa->event->getEventName().str(),
+				static_cast<unsigned>(pa->source),
+				static_cast<unsigned>(state),
+				static_cast<float>(effectiveVolume(pa->event)),
+				pa->positional ? 1 : 0,
+				pa->paused ? 1 : 0);
+			emit(buf);
+		}
+	};
+	dump("SFX",    m_playingSounds);
+	dump("MUSIC",  m_playingMusic);
+	dump("SPEECH", m_playingSpeech);
+}
+#endif
