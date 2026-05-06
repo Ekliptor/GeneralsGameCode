@@ -402,6 +402,11 @@ void WW3DAssetManager::Release_Texture(TextureClass * tex)
 }
 
 void WW3DAssetManager::Load_Procedural_Textures() {}
+// Font3DInstanceClass / Font3DDataClass: legacy DX8-bound 3D billboard text
+// (Render2DTextClass + TextDrawClass). Audited 2026-05-06 — no shipping
+// game-code caller in Generals/GeneralsMD/GameEngine[Device]; UI text uses
+// the separate FontCharsClass + DisplayString pipeline. Deferred until a
+// real consumer surfaces.
 Font3DInstanceClass * WW3DAssetManager::Get_Font3DInstance(const char * /*name*/) { return nullptr; }
 
 // Real FontChars resolution for the BGFX build. Mirrors the DX8 path in
