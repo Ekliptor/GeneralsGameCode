@@ -3779,5 +3779,9 @@ void ControlBar::setFullViewportHeight()
 
 void ControlBar::setScaledViewportHeight()
 {
-	TheTacticalView->setHeight(TheDisplay->getHeight() * TheGlobalData->m_viewportHeightScale);
+	// BGFX backend renders the 3D camera fullscreen (it does not honor the camera's
+	// vMax.Y viewport clip), so shrinking the View height here would put the picker
+	// in a different coord space than the rendered scene — clicks land off-target.
+	// Leave the View at full display height; the sidebar still overlays the bottom.
+	TheTacticalView->setHeight(TheDisplay->getHeight());
 }

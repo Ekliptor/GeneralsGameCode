@@ -830,6 +830,7 @@ void Render2DSentenceClass::Build_Sentence(const WCHAR* text, int* hkX, int* hkY
 	// the first call (and after a backend reset).
 	ensureFontDrawReady(f);
 
+
 	const float lineH = static_cast<float>(f->lineHeightPx);
 	float penX = 0;
 	float penY = 0;

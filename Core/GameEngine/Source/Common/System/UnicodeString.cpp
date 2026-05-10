@@ -390,11 +390,66 @@ void UnicodeString::format_va(const UnicodeString& format, va_list args)
 }
 
 // -----------------------------------------------------
+#ifndef _WIN32
+// On macOS/glibc, vswprintf treats `%s` as `char*` and `%ls` as `wchar_t*`.
+// The original Windows code uses `%s` with WideChar* args (Win32 swprintf
+// convention) and `%hs` for narrow args. Translate the format string in-place:
+// `%s` → `%ls`, `%hs` → `%s`. Without this, every `%s` truncates a wide
+// argument to its first byte, producing single-letter tooltips/strings on Mac.
+static void translateFormatForPosixWide(const WideChar* in, WideChar* out, size_t outCap)
+{
+	size_t o = 0;
+	for (const WideChar* p = in; *p && o + 4 < outCap; )
+	{
+		WideChar c = *p++;
+		if (c != L'%' || !*p) { out[o++] = c; continue; }
+		// Copy flags/width/precision: digits, '-', '+', ' ', '#', '0', '.', '*'
+		out[o++] = L'%';
+		while (*p && (*p == L'-' || *p == L'+' || *p == L' ' || *p == L'#' || *p == L'0'
+			|| *p == L'.' || *p == L'*' || (*p >= L'0' && *p <= L'9'))
+			&& o + 4 < outCap)
+		{
+			out[o++] = *p++;
+		}
+		if (!*p) break;
+		WideChar spec = *p++;
+		if (spec == L'%')
+		{
+			out[o++] = L'%';
+		}
+		else if (spec == L'h' && (*p == L's' || *p == L'S'))
+		{
+			// %hs / %hS → %s (narrow string)
+			out[o++] = L's';
+			++p;
+		}
+		else if (spec == L's')
+		{
+			// %s → %ls (wide string)
+			out[o++] = L'l';
+			out[o++] = L's';
+		}
+		else
+		{
+			out[o++] = spec;
+		}
+	}
+	out[o] = 0;
+}
+#endif
+
 void UnicodeString::format_va(const WideChar* format, va_list args)
 {
 	validate();
 	WideChar buf[MAX_FORMAT_BUF_LEN];
-	const int result = vswprintf(buf, sizeof(buf)/sizeof(WideChar), format, args);
+#ifndef _WIN32
+	WideChar fixedFmt[MAX_FORMAT_BUF_LEN];
+	translateFormatForPosixWide(format, fixedFmt, MAX_FORMAT_BUF_LEN);
+	const WideChar* useFmt = fixedFmt;
+#else
+	const WideChar* useFmt = format;
+#endif
+	const int result = vswprintf(buf, sizeof(buf)/sizeof(WideChar), useFmt, args);
 	if (result >= 0)
 	{
 		set(buf);
